@@ -41,7 +41,7 @@ spec:
   project: apps
   source:
     repoURL: https://github.com/psaawkel/fluodata-infrastructure.git
-    targetRevision: main
+    targetRevision: master
     path: cluster-gitops/apps/scylladb
   destination:
     server: https://kubernetes.default.svc

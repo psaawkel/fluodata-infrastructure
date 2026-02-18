@@ -177,7 +177,7 @@ variable "gitops_repo_path" {
 variable "gitops_target_revision" {
   description = "Git branch/tag for Argo CD to track"
   type        = string
-  default     = "main"
+  default     = "master"
 }
 
 # --- SOPS + age ---

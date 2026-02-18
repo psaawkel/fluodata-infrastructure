@@ -15,7 +15,7 @@ spec:
   project: infrastructure
   source:
     repoURL: https://github.com/psaawkel/fluodata-infrastructure.git
-    targetRevision: main
+    targetRevision: master
     path: cluster-gitops/infrastructure/network-policies
   destination:
     server: https://kubernetes.default.svc

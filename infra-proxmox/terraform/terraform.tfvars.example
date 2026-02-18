@@ -13,7 +13,7 @@ cluster_endpoint = "https://10.10.0.10:6443"
 
 # Git repo for Argo CD
 gitops_repo_url        = "https://github.com/psaawkel/fluodata-infrastructure.git"
-gitops_target_revision = "main"
+gitops_target_revision = "master"
 
 # SOPS age key for secret decryption (optional — generate with: age-keygen -o age.key)
 # sops_age_key_file = "/path/to/age.key"
