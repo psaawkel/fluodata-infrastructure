@@ -29,11 +29,12 @@ data "local_file" "patch_worker" {
 # After Argo CD takes over Cilium management, a version mismatch causes
 # a perpetual fight between Talos inline manifests and Argo CD.
 data "helm_template" "cilium" {
-  name       = "cilium"
-  namespace  = "kube-system"
-  repository = "https://helm.cilium.io/"
-  chart      = "cilium"
-  version    = var.cilium_version
+  name         = "cilium"
+  namespace    = "kube-system"
+  repository   = "https://helm.cilium.io/"
+  chart        = "cilium"
+  version      = var.cilium_version
+  kube_version = "1.32.0"
 
   set {
     name  = "ipam.mode"
@@ -211,7 +212,7 @@ resource "talos_machine_bootstrap" "this" {
 }
 
 # --- Retrieve kubeconfig ---
-data "talos_cluster_kubeconfig" "this" {
+resource "talos_cluster_kubeconfig" "this" {
   client_configuration = talos_machine_secrets.this.client_configuration
   node                 = var.controlplane_nodes[0].ip
 
@@ -238,7 +239,7 @@ data "talos_cluster_health" "this" {
 
 # --- Write kubeconfig to file ---
 resource "local_file" "kubeconfig" {
-  content  = data.talos_cluster_kubeconfig.this.kubeconfig_raw
+  content  = talos_cluster_kubeconfig.this.kubeconfig_raw
   filename = local.kubeconfig_path
 
   depends_on = [data.talos_cluster_health.this]

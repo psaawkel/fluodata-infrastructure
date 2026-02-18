@@ -11,6 +11,7 @@ override.tf.json
 .terraformrc
 terraform.rc
 terraform.tfvars
+tfplan
 
 # Talos generated configs
 infra-proxmox/talos/generated/
