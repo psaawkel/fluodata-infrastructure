@@ -1,4 +1,4 @@
-# Terraform lock file
+# Terraform
 .terraform/
 .terraform.lock.hcl
 *.tfstate
@@ -10,6 +10,7 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+terraform.tfvars
 
 # Talos generated configs
 infra-proxmox/talos/generated/
@@ -22,6 +23,7 @@ kubeconfig
 # SOPS age keys (never commit private keys)
 *.agekey
 age.key
+.secrets/
 
 # Editor
 .idea/

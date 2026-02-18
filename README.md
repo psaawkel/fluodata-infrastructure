@@ -247,9 +247,9 @@ See [EXPERIENCE.md](EXPERIENCE.md) for comprehensive deployment lessons.
 
 ## TODO
 
-- [ ] Replace `YOUR_ORG` in all `repoURL` fields with actual GitHub org
-- [ ] Replace `CHANGEME@example.com` in cert-manager ClusterIssuers with actual email
-- [ ] Encrypt `pg-credentials.sops.yaml` with actual password
-- [ ] Update `.sops.yaml` with actual age public key
+- [x] Replace `YOUR_ORG` in all `repoURL` fields with actual GitHub org
+- [x] Replace `CHANGEME@example.com` in cert-manager ClusterIssuers with actual email
+- [x] Encrypt `pg-credentials.sops.yaml` with actual password
+- [x] Update `.sops.yaml` with actual age public key
 - [ ] WireGuard host-level configuration (Phase 3)
 - [ ] Validate Helm chart versions against latest stable releases

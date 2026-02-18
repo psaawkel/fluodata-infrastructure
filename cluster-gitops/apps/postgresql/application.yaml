@@ -41,7 +41,7 @@ metadata:
 spec:
   project: apps
   source:
-    repoURL: https://github.com/YOUR_ORG/fluodata-infrastructure.git # TODO: update
+    repoURL: https://github.com/psaawkel/fluodata-infrastructure.git
     targetRevision: main
     path: cluster-gitops/apps/postgresql
   destination:

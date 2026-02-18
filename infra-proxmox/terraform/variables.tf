@@ -99,7 +99,7 @@ variable "controlplane_nodes" {
       name      = "talos-cp-1"
       vmid      = 100
       ip        = "10.10.0.10"
-      mac       = "52:54:00:00:00:10"
+      mac       = "BC:24:11:00:01:10"
       cores     = 2
       memory    = 8192
       disk_size = 20
@@ -124,7 +124,7 @@ variable "worker_nodes" {
       name          = "talos-worker-1"
       vmid          = 110
       ip            = "10.10.0.20"
-      mac           = "52:54:00:00:00:20"
+      mac           = "BC:24:11:00:01:20"
       cores         = 4
       memory        = 12288
       disk_size     = 20
@@ -134,7 +134,7 @@ variable "worker_nodes" {
       name          = "talos-worker-2"
       vmid          = 111
       ip            = "10.10.0.21"
-      mac           = "52:54:00:00:00:21"
+      mac           = "BC:24:11:00:01:21"
       cores         = 4
       memory        = 12288
       disk_size     = 20

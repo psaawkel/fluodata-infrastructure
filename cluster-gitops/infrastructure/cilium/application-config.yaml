@@ -12,7 +12,7 @@ metadata:
 spec:
   project: infrastructure
   source:
-    repoURL: https://github.com/YOUR_ORG/fluodata-infrastructure.git # TODO: update
+    repoURL: https://github.com/psaawkel/fluodata-infrastructure.git
     targetRevision: main
     path: cluster-gitops/infrastructure/cilium
   destination:

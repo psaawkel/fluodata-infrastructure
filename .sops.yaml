@@ -5,4 +5,4 @@
 creation_rules:
   - path_regex: \.sops\.yaml$
     age: >-
-      age1CHANGEME_REPLACE_WITH_YOUR_AGE_PUBLIC_KEY
+      age17r5p9rzudxc8s3e6mdlwjalh2q7mpq77c69sqwwcg4f838j4fafqn6689a
