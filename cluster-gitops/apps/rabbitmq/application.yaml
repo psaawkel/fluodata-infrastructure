@@ -1,0 +1,76 @@
+# RabbitMQ Cluster Operator installation.
+# The operator is installed from the official release manifest.
+# This file is a local copy of the operator CRDs + deployment.
+# To update: download from https://github.com/rabbitmq/cluster-operator/releases
+#
+# For Argo CD, we point to the operator's Helm chart from OCI registry.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: rabbitmq-cluster-operator
+    targetRevision: "4.4.0"
+    helm:
+      valuesObject:
+        # Only install the operator, not a RabbitMQ instance
+        rabbitmqImage:
+          tag: "3.13"
+        clusterOperator:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rabbitmq-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+# RabbitMQ cluster instance
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/YOUR_ORG/fluodata-infrastructure.git # TODO: update
+    targetRevision: main
+    path: cluster-gitops/apps/rabbitmq
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fluodata
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

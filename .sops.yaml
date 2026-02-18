@@ -1,0 +1,8 @@
+# SOPS configuration
+# Defines which age public key to use for encrypting secrets.
+# The corresponding private key must be available to Argo CD repo-server
+# via the sops-age-key Kubernetes secret.
+creation_rules:
+  - path_regex: \.sops\.yaml$
+    age: >-
+      age1CHANGEME_REPLACE_WITH_YOUR_AGE_PUBLIC_KEY

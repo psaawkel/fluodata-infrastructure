@@ -1,0 +1,31 @@
+# ScyllaDB Cluster
+# Right-sized for ~5k IoT devices with ~50% headroom.
+# IMPORTANT: developerMode MUST be true on Talos Linux.
+# Talos is immutable and cannot satisfy ScyllaDB's kernel tuning requirements.
+apiVersion: scylla.scylladb.com/v1
+kind: ScyllaCluster
+metadata:
+  name: fluodata-scylla
+  namespace: fluodata
+spec:
+  version: "5.4"
+  agentVersion: "3.3.0"
+
+  # Required for Talos (immutable OS cannot tune kernel params)
+  developerMode: true
+
+  datacenter:
+    name: dc1
+    racks:
+      - name: rack1
+        members: 1
+        storage:
+          storageClassName: longhorn
+          capacity: 20Gi
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi

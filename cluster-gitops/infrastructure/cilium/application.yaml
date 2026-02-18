@@ -1,0 +1,69 @@
+# Cilium CNI - Argo CD takes over management from Talos inline manifests.
+# Cilium is already running (installed via Talos inlineManifests at bootstrap).
+# This Application ensures Argo CD manages config/upgrades going forward.
+#
+# IMPORTANT: The Cilium version here MUST match var.cilium_version in
+# infra-proxmox/terraform/variables.tf (used for Talos inline manifests).
+# A version mismatch causes a perpetual fight between Talos and Argo CD.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cilium
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  source:
+    repoURL: https://helm.cilium.io/
+    chart: cilium
+    targetRevision: "1.17.0"
+    helm:
+      valuesObject:
+        ipam:
+          mode: kubernetes
+        kubeProxyReplacement: true
+        securityContext:
+          capabilities:
+            ciliumAgent:
+              - CHOWN
+              - KILL
+              - NET_ADMIN
+              - NET_RAW
+              - IPC_LOCK
+              - SYS_ADMIN
+              - SYS_RESOURCE
+              - DAC_OVERRIDE
+              - FOWNER
+              - SETGID
+              - SETUID
+            cleanCiliumState:
+              - NET_ADMIN
+              - SYS_ADMIN
+              - SYS_RESOURCE
+        cgroup:
+          autoMount:
+            enabled: false
+          hostRoot: /sys/fs/cgroup
+        # L2 announcements for LoadBalancer (replaces MetalLB)
+        l2announcements:
+          enabled: true
+        externalIPs:
+          enabled: true
+        # Hubble observability
+        hubble:
+          relay:
+            enabled: true
+          ui:
+            enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

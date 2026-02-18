@@ -1,0 +1,26 @@
+# ============================================================
+# Talos common patch - applied to ALL nodes
+# ============================================================
+machine:
+  # NTP
+  time:
+    servers:
+      - time.cloudflare.com
+      - pool.ntp.org
+
+  # Kernel modules for Longhorn and networking
+  kernel:
+    modules:
+      - name: iscsi_tcp
+      - name: dm_thin_pool
+
+  # Kubelet extra config
+  kubelet:
+    extraArgs:
+      rotate-server-certificates: "true"
+
+  # Sysctls for network performance
+  sysctls:
+    net.core.somaxconn: "65535"
+    net.core.netdev_max_backlog: "5000"
+    vm.overcommit_memory: "1"

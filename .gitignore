@@ -1,0 +1,35 @@
+# Terraform lock file
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Talos generated configs
+infra-proxmox/talos/generated/
+infra-proxmox/talos/secrets.yaml
+
+# Kubeconfig
+kubeconfig
+*.kubeconfig
+
+# SOPS age keys (never commit private keys)
+*.agekey
+age.key
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

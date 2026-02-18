@@ -1,0 +1,8 @@
+# ============================================================
+# Talos worker patch
+# ============================================================
+# Worker-specific config. Longhorn disk mount is handled dynamically
+# in Terraform based on the longhorn_disk variable.
+machine:
+  nodeLabels:
+    node-role.kubernetes.io/worker: ""

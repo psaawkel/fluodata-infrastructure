@@ -1,0 +1,27 @@
+# NetworkPolicies managed via Argo CD.
+# Default-deny + allow-list policies for all namespaces.
+# Sync wave -3 deploys these early (alongside namespaces) so policies
+# are in place before workloads start.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: network-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  source:
+    repoURL: https://github.com/YOUR_ORG/fluodata-infrastructure.git # TODO: update
+    targetRevision: main
+    path: cluster-gitops/infrastructure/network-policies
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

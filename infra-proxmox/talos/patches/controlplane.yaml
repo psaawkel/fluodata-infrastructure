@@ -1,0 +1,11 @@
+# ============================================================
+# Talos control plane patch
+# ============================================================
+cluster:
+  # Allow scheduling workloads on control plane (single CP setups)
+  allowSchedulingOnControlPlanes: true
+
+  # etcd: listen on all interfaces for multi-host WireGuard
+  etcd:
+    advertisedSubnets:
+      - 10.10.0.0/24

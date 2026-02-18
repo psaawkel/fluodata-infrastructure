@@ -1,0 +1,69 @@
+# RabbitMQ Cluster
+# Right-sized for ~5k IoT devices with ~50% headroom.
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: rabbitmq
+  namespace: fluodata
+spec:
+  replicas: 1
+
+  image: rabbitmq:3.13-management
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  persistence:
+    storageClassName: longhorn
+    storage: 10Gi
+
+  rabbitmq:
+    additionalPlugins:
+      - rabbitmq_mqtt
+      - rabbitmq_web_stomp
+      - rabbitmq_management
+
+    additionalConfig: |
+      # MQTT
+      mqtt.listeners.tcp.default = 1883
+      mqtt.allow_anonymous = false
+      mqtt.default_user = guest
+      mqtt.exchange = amq.topic
+      mqtt.max_session_expiry_interval_seconds = 86400
+
+      # Memory
+      vm_memory_high_watermark.relative = 0.7
+
+  service:
+    type: ClusterIP
+
+  override:
+    service:
+      spec:
+        ports: []
+
+  # MQTT LoadBalancer service is defined separately below
+---
+# MQTT LoadBalancer service (Cilium L2 assigns IP from mqtt-pool)
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-mqtt
+  namespace: fluodata
+  labels:
+    app: mqtt
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/component: rabbitmq
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+      protocol: TCP
