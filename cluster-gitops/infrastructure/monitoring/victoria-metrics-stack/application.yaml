@@ -15,6 +15,11 @@ spec:
     targetRevision: "0.30.0"
     helm:
       valuesObject:
+        # Short name to avoid >63 char limit on generated resource names.
+        # The operator prefixes names with "vmalertmanager-", "vmalert-", etc.
+        # which exceeds 63 chars with the default fullname.
+        fullnameOverride: vmstack
+
         # --- Operator ---
         victoria-metrics-operator:
           enabled: true
