@@ -105,6 +105,8 @@ spec:
               installOperator: false
         lokiCanary:
           enabled: false
+        test:
+          enabled: false
         chunksCache:
           enabled: false
         resultsCache:

@@ -64,7 +64,7 @@ spec:
                   url = "http://loki-gateway.logging.svc.cluster.local/loki/api/v1/push"
 
                   batch_wait    = "1s"
-                  batch_size    = "1048576"
+                  batch_size    = 1048576
                 }
                 external_labels = {
                   cluster = "fluodata",

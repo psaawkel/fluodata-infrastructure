@@ -18,12 +18,10 @@ spec:
   source:
     repoURL: https://charts.bitnami.com/bitnami
     chart: rabbitmq-cluster-operator
-    targetRevision: "4.4.0"
+    targetRevision: "4.4.34"
     helm:
       valuesObject:
         # Only install the operator, not a RabbitMQ instance
-        rabbitmqImage:
-          tag: "3.13"
         clusterOperator:
           resources:
             requests:
