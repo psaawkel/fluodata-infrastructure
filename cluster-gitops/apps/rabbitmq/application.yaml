@@ -23,6 +23,9 @@ spec:
       valuesObject:
         # Only install the operator, not a RabbitMQ instance
         # Override Bitnami images with official RabbitMQ ones (Bitnami purged theirs from Docker Hub)
+        global:
+          security:
+            allowInsecureImages: true
         clusterOperator:
           image:
             registry: docker.io
