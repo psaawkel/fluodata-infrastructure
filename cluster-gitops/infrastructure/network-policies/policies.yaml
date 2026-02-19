@@ -87,6 +87,102 @@ spec:
         - protocol: TCP
           port: 1883
 ---
+# Allow CNPG operator (cnpg-system ns) -> PostgreSQL pods for health checks
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-cnpg-operator
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+---
+# Allow scylla-operator -> ScyllaDB pods for cluster management
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-scylla-operator
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: scylla-operator
+---
+# Allow RabbitMQ cluster operator -> RabbitMQ pods for management
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-rabbitmq-operator
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rabbitmq-system
+---
+# ============================================================
+# cnpg-system namespace
+# ============================================================
+
+# Allow kube-apiserver to reach CNPG operator webhook.
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: cnpg-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudnative-pg
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+---
+# ============================================================
+# scylla-operator namespace
+# ============================================================
+
+# Allow kube-apiserver to reach scylla-operator webhook.
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: scylla-operator
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: webhook-server
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+---
 # ============================================================
 # longhorn-system namespace
 # ============================================================
