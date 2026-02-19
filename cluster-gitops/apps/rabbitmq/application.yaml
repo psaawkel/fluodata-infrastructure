@@ -31,6 +31,8 @@ spec:
             registry: docker.io
             repository: rabbitmqoperator/cluster-operator
             tag: "2.16.0"
+          command:
+            - /manager
           resources:
             requests:
               cpu: 50m
@@ -43,6 +45,8 @@ spec:
             registry: docker.io
             repository: rabbitmqoperator/messaging-topology-operator
             tag: "1.17.0"
+          command:
+            - /manager
         credentialUpdaterImage:
           registry: docker.io
           repository: rabbitmqoperator/default-user-credential-updater
