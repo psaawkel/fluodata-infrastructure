@@ -172,7 +172,7 @@ variable "gitops_repo_url" {
 variable "gitops_repo_path" {
   description = "Path within the repo for the root app"
   type        = string
-  default     = "cluster-gitops/bootstrap"
+  default     = "cluster-gitops"
 }
 
 variable "gitops_target_revision" {

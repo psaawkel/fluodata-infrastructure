@@ -1,0 +1,45 @@
+# ============================================================
+# Argo CD Root Bootstrap
+# ============================================================
+# This kustomization is the entry point for Argo CD. It creates:
+#   1. Argo CD AppProjects (infrastructure, apps)
+#   2. Argo CD Applications for each infrastructure component
+#   3. Argo CD Applications for each app component
+#
+# Sync waves control deployment order:
+#   wave -3: Namespaces (PodSecurity labels), NetworkPolicies
+#   wave -2: Cilium (CNI, already running via Talos inline, Argo takes over)
+#   wave -1: Cilium config (IP pools), Longhorn (storage)
+#   wave  0: Ingress, cert-manager, monitoring
+#   wave  1: Operators (CNPG, RabbitMQ, ScyllaDB), app secrets
+#   wave  2: Application instances (PostgreSQL, RabbitMQ, ScyllaDB clusters)
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Projects
+  - projects/infrastructure.yaml
+  - projects/apps.yaml
+
+  # Infrastructure Applications (ordered by sync wave)
+  - infrastructure/namespaces/application.yaml
+  - infrastructure/network-policies/application.yaml
+  - infrastructure/cilium/application.yaml
+  - infrastructure/csr-approver/application.yaml
+  - infrastructure/cilium/application-config.yaml
+  - infrastructure/longhorn/application.yaml
+  - infrastructure/ingress-nginx/application.yaml
+  - infrastructure/cert-manager/application.yaml
+  - infrastructure/cert-manager/application-issuers.yaml
+  - infrastructure/monitoring/victoria-metrics-stack/application.yaml
+  - infrastructure/monitoring/loki/application.yaml
+  - infrastructure/monitoring/alloy/application.yaml
+
+  # App secrets (SOPS-encrypted, must deploy before app instances)
+  - apps/secrets/application.yaml
+
+  # App operator + instance Applications
+  - apps/postgresql/application.yaml
+  - apps/rabbitmq/application.yaml
+  - apps/scylladb/application.yaml
