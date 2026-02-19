@@ -147,32 +147,25 @@ spec:
         - namespaceSelector: {}
 ---
 # Allow kube-apiserver to reach Longhorn admission webhook.
-# With Cilium VXLAN tunneling + kube-proxy replacement, the API server's host IP
-# (10.10.0.x) is translated to a pod CIDR address (10.244.x.x) when the target pod
-# is on a different node. We must allow from the entire pod CIDR.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+# Uses CiliumNetworkPolicy with fromEntities because standard K8s NetworkPolicy
+# ipBlock rules don't match Cilium's "remote-node" identity in VXLAN mode.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: allow-apiserver-webhook
   namespace: longhorn-system
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app: longhorn-manager
-  policyTypes:
-    - Ingress
   ingress:
-    - ports:
-        - protocol: TCP
-          port: 9502
-      from:
-        - ipBlock:
-            cidr: 10.10.0.0/24
-        - ipBlock:
-            cidr: 10.244.0.0/16
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9502"
+              protocol: TCP
 ---
 # ============================================================
 # monitoring namespace
@@ -235,32 +228,25 @@ spec:
         - namespaceSelector: {}
 ---
 # Allow kube-apiserver to reach VictoriaMetrics operator webhook.
-# With Cilium VXLAN tunneling + kube-proxy replacement, the API server's host IP
-# is translated to a pod CIDR address when crossing nodes. Allow both CIDRs.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: allow-apiserver-webhook
   namespace: monitoring
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/instance: victoria-metrics-stack
       app.kubernetes.io/name: victoria-metrics-operator
-  policyTypes:
-    - Ingress
   ingress:
-    - ports:
-        - protocol: TCP
-          port: 9443
-      from:
-        - ipBlock:
-            cidr: 10.10.0.0/24
-        - ipBlock:
-            cidr: 10.244.0.0/16
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
 ---
 # ============================================================
 # logging namespace
@@ -342,30 +328,24 @@ spec:
           port: 443
 ---
 # Allow kube-apiserver to reach ingress-nginx admission webhook.
-# With Cilium VXLAN tunneling, API server source IP is from pod CIDR.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: allow-apiserver-webhook
   namespace: ingress-nginx
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: ingress-nginx
-  policyTypes:
-    - Ingress
   ingress:
-    - ports:
-        - protocol: TCP
-          port: 8443
-      from:
-        - ipBlock:
-            cidr: 10.10.0.0/24
-        - ipBlock:
-            cidr: 10.244.0.0/16
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
 ---
 # Allow monitoring scraping
 apiVersion: networking.k8s.io/v1
@@ -429,31 +409,25 @@ spec:
               kubernetes.io/metadata.name: monitoring
 ---
 # Allow kube-apiserver to reach cert-manager webhook for admission validation.
-# With Cilium VXLAN tunneling + kube-proxy replacement, when the API server
-# (host network 10.10.0.10) calls a webhook pod on a different node, Cilium
-# encapsulates the packet and the source IP becomes the node's Cilium router
-# address in the pod CIDR (10.244.x.x), not the original host IP. We must
-# allow from both the host network and the entire pod CIDR.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+# IMPORTANT: Standard K8s NetworkPolicy ipBlock rules do NOT match Cilium's
+# "remote-node" identity. When the API server (host network) calls a webhook pod
+# on a different node via VXLAN, Cilium assigns the "remote-node" reserved identity
+# to those packets. ipBlock CIDR rules only match "world"/"CIDR" identities.
+# Therefore we MUST use CiliumNetworkPolicy with fromEntities to allow this traffic.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: allow-apiserver-webhook
   namespace: cert-manager
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/component: webhook
-  policyTypes:
-    - Ingress
   ingress:
-    - ports:
-        - protocol: TCP
-          port: 10250
-      from:
-        - ipBlock:
-            cidr: 10.10.0.0/24
-        - ipBlock:
-            cidr: 10.244.0.0/16
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "10250"
+              protocol: TCP
