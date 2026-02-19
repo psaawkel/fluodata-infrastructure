@@ -16,6 +16,7 @@ tfplan
 # Talos generated configs
 infra-proxmox/talos/generated/
 infra-proxmox/talos/secrets.yaml
+infra-proxmox/terraform/talosconfig
 
 # Kubeconfig
 kubeconfig

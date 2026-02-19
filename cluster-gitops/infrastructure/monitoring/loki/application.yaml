@@ -51,6 +51,7 @@ spec:
             max_query_series: 500
           compactor:
             retention_enabled: true
+            delete_request_store: filesystem
 
         # Disable all non-SingleBinary components
         backend:

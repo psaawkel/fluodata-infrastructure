@@ -146,6 +146,29 @@ spec:
     - from:
         - namespaceSelector: {}
 ---
+# Allow kube-apiserver to reach Longhorn admission webhook.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: longhorn-system
+spec:
+  podSelector:
+    matchLabels:
+      app: longhorn-manager
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 9502
+      from:
+        - ipBlock:
+            cidr: 10.10.0.0/24
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+---
 # ============================================================
 # monitoring namespace
 # ============================================================
@@ -205,6 +228,31 @@ spec:
   ingress:
     - from:
         - namespaceSelector: {}
+---
+# Allow kube-apiserver to reach VictoriaMetrics operator webhook.
+# API server runs on host network (10.10.0.x), not a pod namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: victoria-metrics-stack
+      app.kubernetes.io/name: victoria-metrics-operator
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 9443
+      from:
+        - ipBlock:
+            cidr: 10.10.0.0/24
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
 ---
 # ============================================================
 # logging namespace
@@ -285,6 +333,29 @@ spec:
         - protocol: TCP
           port: 443
 ---
+# Allow kube-apiserver to reach ingress-nginx admission webhook.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: ingress-nginx
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8443
+      from:
+        - ipBlock:
+            cidr: 10.10.0.0/24
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+---
 # Allow monitoring scraping
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -345,3 +416,29 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
+---
+# Allow kube-apiserver to reach cert-manager webhook for admission validation.
+# The API server runs on the host network (control plane nodes), so we allow
+# from all pod CIDR sources and the control plane IP. We also allow from
+# kube-system namespace (where API server pods reside on Talos).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: cert-manager
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: webhook
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 10250
+      from:
+        - ipBlock:
+            cidr: 10.10.0.0/24
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
