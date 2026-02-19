@@ -34,7 +34,7 @@ data "helm_template" "cilium" {
   repository   = "https://helm.cilium.io/"
   chart        = "cilium"
   version      = var.cilium_version
-  kube_version = "1.32.0"
+  kube_version = "1.35.0"
 
   set {
     name  = "ipam.mode"
@@ -44,6 +44,19 @@ data "helm_template" "cilium" {
   set {
     name  = "kubeProxyReplacement"
     value = "true"
+  }
+
+  # When kube-proxy is disabled, Cilium must reach the K8s API directly
+  # (not via ClusterIP 10.96.0.1) because Cilium itself provides ClusterIP routing.
+  # Without this, the cilium-agent init container times out trying to connect.
+  set {
+    name  = "k8sServiceHost"
+    value = var.controlplane_nodes[0].ip
+  }
+
+  set {
+    name  = "k8sServicePort"
+    value = "6443"
   }
 
   set {
@@ -104,7 +117,9 @@ data "talos_machine_configuration" "controlplane" {
     yamlencode({
       machine = {
         network = {
-          hostname = each.value.name
+          # hostname omitted: Talos v1.12+ rejects having hostname in v1alpha1 config
+          # alongside the auto-generated HostnameConfig document. Hostnames are set
+          # via DHCP (dnsmasq MAC-based reservations on vmbr1).
           interfaces = [{
             interface = "eth0"
             addresses = ["${each.value.ip}/24"]
@@ -149,7 +164,9 @@ data "talos_machine_configuration" "worker" {
     yamlencode({
       machine = {
         network = {
-          hostname = each.value.name
+          # hostname omitted: Talos v1.12+ rejects having hostname in v1alpha1 config
+          # alongside the auto-generated HostnameConfig document. Hostnames are set
+          # via DHCP (dnsmasq MAC-based reservations on vmbr1).
           interfaces = [{
             interface = "eth0"
             addresses = ["${each.value.ip}/24"]

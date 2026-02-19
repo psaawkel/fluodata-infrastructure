@@ -35,14 +35,15 @@ variable "proxmox_node" {
 variable "talos_version" {
   description = "Talos Linux version"
   type        = string
-  default     = "1.9.2"
+  default     = "1.12.4"
 }
 
 variable "talos_iso_url" {
   description = "Talos ISO URL (factory image with extensions). Generate at https://factory.talos.dev/"
   type        = string
   # Default includes iscsi-tools + util-linux-tools for Longhorn
-  default = "https://factory.talos.dev/image/08e3e7e1efef4a7e26573e80b17a0e0eea65085e43610e7048773b0b54e1db28/v1.9.2/nocloud-amd64.iso"
+  # Schematic: 613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
+  default = "https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.12.4/nocloud-amd64.iso"
 }
 
 variable "talos_iso_storage" {
