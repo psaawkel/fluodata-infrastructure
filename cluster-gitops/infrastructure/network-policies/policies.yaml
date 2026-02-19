@@ -147,6 +147,9 @@ spec:
         - namespaceSelector: {}
 ---
 # Allow kube-apiserver to reach Longhorn admission webhook.
+# With Cilium VXLAN tunneling + kube-proxy replacement, the API server's host IP
+# (10.10.0.x) is translated to a pod CIDR address (10.244.x.x) when the target pod
+# is on a different node. We must allow from the entire pod CIDR.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -165,6 +168,8 @@ spec:
       from:
         - ipBlock:
             cidr: 10.10.0.0/24
+        - ipBlock:
+            cidr: 10.244.0.0/16
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
@@ -230,7 +235,8 @@ spec:
         - namespaceSelector: {}
 ---
 # Allow kube-apiserver to reach VictoriaMetrics operator webhook.
-# API server runs on host network (10.10.0.x), not a pod namespace.
+# With Cilium VXLAN tunneling + kube-proxy replacement, the API server's host IP
+# is translated to a pod CIDR address when crossing nodes. Allow both CIDRs.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -250,6 +256,8 @@ spec:
       from:
         - ipBlock:
             cidr: 10.10.0.0/24
+        - ipBlock:
+            cidr: 10.244.0.0/16
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
@@ -334,6 +342,7 @@ spec:
           port: 443
 ---
 # Allow kube-apiserver to reach ingress-nginx admission webhook.
+# With Cilium VXLAN tunneling, API server source IP is from pod CIDR.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -352,6 +361,8 @@ spec:
       from:
         - ipBlock:
             cidr: 10.10.0.0/24
+        - ipBlock:
+            cidr: 10.244.0.0/16
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
@@ -418,9 +429,11 @@ spec:
               kubernetes.io/metadata.name: monitoring
 ---
 # Allow kube-apiserver to reach cert-manager webhook for admission validation.
-# The API server runs on the host network (control plane nodes), so we allow
-# from all pod CIDR sources and the control plane IP. We also allow from
-# kube-system namespace (where API server pods reside on Talos).
+# With Cilium VXLAN tunneling + kube-proxy replacement, when the API server
+# (host network 10.10.0.10) calls a webhook pod on a different node, Cilium
+# encapsulates the packet and the source IP becomes the node's Cilium router
+# address in the pod CIDR (10.244.x.x), not the original host IP. We must
+# allow from both the host network and the entire pod CIDR.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -439,6 +452,8 @@ spec:
       from:
         - ipBlock:
             cidr: 10.10.0.0/24
+        - ipBlock:
+            cidr: 10.244.0.0/16
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
