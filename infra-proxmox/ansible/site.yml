@@ -1,0 +1,14 @@
+---
+# =============================================================================
+# site.yml — Full cluster deployment
+#
+# Usage:
+#   ansible-playbook site.yml
+# =============================================================================
+- name: Deploy Talos Kubernetes cluster on Proxmox
+  hosts: proxmox
+  gather_facts: false
+  roles:
+    - proxmox_vms
+    - talos_cluster
+    - cilium

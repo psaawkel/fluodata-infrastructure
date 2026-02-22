@@ -1,0 +1,17 @@
+# Per-node patch: static IP, routes, nameservers
+# NO hostname — dnsmasq handles it via DHCP (Talos v1.12.4 rejects hostname if DHCP sets one)
+machine:
+  network:
+    interfaces:
+      - interface: eth0
+        addresses:
+          - {{ item.ip }}/{{ vm_subnet_mask }}
+        routes:
+          - network: 0.0.0.0/0
+            gateway: {{ vm_gateway }}
+    nameservers:
+{% for ns in vm_nameservers %}
+      - {{ ns }}
+{% endfor %}
+  install:
+    disk: /dev/sda

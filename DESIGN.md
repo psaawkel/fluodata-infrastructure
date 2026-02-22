@@ -1,8 +1,8 @@
 # FluoData Infrastructure - Talos on Proxmox IaC Design
 
-**Version:** 1.1 (Simplified per feedback)  
-**Status:** Draft for Discussion  
-**Date:** 2026-02-19
+**Version:** 2.0 (Ansible-based)  
+**Status:** Implemented and working  
+**Date:** 2026-02-22
 
 ---
 
@@ -10,37 +10,57 @@
 
 **One command to deploy a bare Talos cluster on Proxmox:**
 ```bash
-terraform -chdir=infra-proxmox apply
+ansible-playbook site.yml
+```
+
+**One command to tear it down:**
+```bash
+ansible-playbook destroy.yml
 ```
 
 ---
 
-## 2. What's Removed (Not Needed)
+## 2. Design Decisions
 
-| Removed | Reason |
-|---------|--------|
-| **MetalLB** | Traefik can use hostNetwork directly |
-| **cert-manager** | Traefik has built-in Let's Encrypt (ACME) |
-| **Ansible** | Replaced with pure Terraform |
-| **Multiple layers** | Just Terraform + ArgoCD |
+| Decision | Rationale |
+|----------|-----------|
+| **Ansible over Terraform** | Terraform's `stop_on_destroy` with Talos VMs is dangerously slow (5+ min ACPI timeout). Ansible handles VM lifecycle, imperative bootstrap steps (talosctl, helm), and teardown cleanly. |
+| **No shell scripts** | All automation lives in Ansible roles. No `init-cluster.sh` or `add-worker.sh`. |
+| **Cilium via Helm** (not inline manifest) | Post-bootstrap `helm install` is simpler and more maintainable than embedding 1600+ lines of YAML in Talos config. Nodes are `NotReady` until Cilium deploys — this is expected. |
+| **No `machine.network.hostname`** | dnsmasq assigns hostnames via DHCP (MAC-based). Talos v1.12.4 rejects configs with hostname if DHCP already set one. |
+| **Proxmox API modules on localhost** | `community.proxmox.proxmox_kvm` uses REST API + `proxmoxer` library. Runs on controller with `delegate_to: localhost`. |
+| **talosctl/helm on Proxmox host** | VMs are on internal vmbr1 (10.10.0.0/24), not reachable from laptop. All cluster commands run on Proxmox via SSH. |
 
 ---
 
-## 3. Simplified Architecture
+## 3. Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│         terraform apply                     │
-│    (infra-proxmox/)                        │
+│     ansible-playbook site.yml               │
+│     (infra-proxmox/ansible/)                │
 └─────────────────────────────────────────────┘
         │
-        ├── Proxmox VMs (Telmate provider)
-        ├── Talos configs + bootstrap
-        └── ArgoCD install (Helm)
-                │
-                ▼
-        ArgoCD manages cluster apps
-        (Cilium, Longhorn, Traefik, etc.)
+        ├── Role: proxmox_vms
+        │   ├── Download Talos ISO (get_url on Proxmox host)
+        │   ├── Create VMs (proxmox_kvm → REST API from localhost)
+        │   └── Start VMs
+        │
+        ├── Role: talos_cluster
+        │   ├── Generate secrets (talosctl on Proxmox host)
+        │   ├── Generate config patches (Jinja2 templates)
+        │   ├── Generate configs from secrets + patches
+        │   ├── Apply configs to each node
+        │   ├── Bootstrap control plane
+        │   └── Fetch kubeconfig
+        │
+        └── Role: cilium
+            ├── helm repo add + helm upgrade --install (on Proxmox host)
+            └── Wait for all nodes Ready
+                    │
+                    ▼
+            Cluster is RUNNING
+            (ArgoCD manages apps later)
 ```
 
 ---
@@ -49,67 +69,127 @@ terraform -chdir=infra-proxmox apply
 
 ```
 fluodata-infrastructure/
-├── infra-proxmox/              # ⭐ One-command deploy
-│   ├── main.tf                 # All-in-one or split modules
-│   ├── variables.tf            # proxmox_url, token, node, etc.
-│   ├── terraform.tfvars        # cluster config
-│   └── ...
+├── EXPERIENCE.md              # Hard-won deployment lessons
+├── DESIGN.md                  # This file
+├── REQUIREMENTS.md            # Requirements spec
 │
-├── cluster-gitops/             # ArgoCD apps
-│   ├── app-of-apps.yaml
-│   ├── cilium.yaml
-│   ├── longhorn.yaml
-│   ├── traefik.yaml            # Includes TLS
-│   ├── victoria-metrics.yaml
-│   ├── loki.yaml
-│   └── database/               # cloudnativepg, rabbitmq
+├── infra-proxmox/
+│   ├── ansible/               # Active deployment
+│   │   ├── ansible.cfg
+│   │   ├── site.yml           # Full deploy playbook
+│   │   ├── destroy.yml        # Teardown playbook
+│   │   ├── inventory/
+│   │   │   ├── hosts.yml
+│   │   │   └── group_vars/
+│   │   │       └── all.yml    # All config in one place
+│   │   └── roles/
+│   │       ├── proxmox_vms/
+│   │       ├── talos_cluster/
+│   │       └── cilium/
+│   │
+│   ├── talos/                 # Generated files (by Ansible)
+│   │   ├── secrets.yaml       # Cluster secrets (reusable)
+│   │   ├── talosconfig
+│   │   └── kubeconfig
+│   │
+│   └── terraform/             # Legacy (kept for reference)
 │
-└── docs/
-    └── DESIGN.md
+└── cluster-gitops/            # (future) ArgoCD apps
 ```
 
 ---
 
-## 5. Terraform Scope
+## 5. Ansible Scope
 
-### 5.1 What Terraform Does
+### 5.1 What Ansible Does
 
 1. **Create VMs** on Proxmox
-   - Control plane node(s)
-   - Worker node(s)
-   - Network config (MAC addresses for DHCP)
+   - Control plane + worker nodes
+   - Deterministic MAC addresses for DHCP
+   - Boot + Longhorn disks (workers only)
 
 2. **Generate Talos configs**
-   - Cluster endpoint, secrets
-   - Kubelet cert approver (EXPERIENCE.md lesson)
-   - Cilium as inline manifest (EXPERIENCE.md lesson)
+   - Cluster secrets (generated once, reused)
+   - Config patches via Jinja2 templates (per-role + per-node)
+   - No hostname in patches (dnsmasq handles it)
 
 3. **Bootstrap cluster**
-   - Wait for nodes to boot
-   - Apply configs
-   - Bootstrap Talos
+   - Apply configs to all nodes
+   - Bootstrap control plane etcd
+   - Fetch kubeconfig
 
-4. **Install ArgoCD**
-   - Helm chart via `helm_release`
-   - Create initial App-of-Apps Application
+4. **Install Cilium** via Helm
+   - Post-bootstrap (nodes NotReady until CNI deploys)
+   - Wait for all nodes Ready
 
-### 5.2 What Terraform Does NOT Do
+### 5.2 What Ansible Does NOT Do
 
-- **Any Kubernetes workloads** - that's ArgoCD's job
-- **WireGuard** - manual or separate Terraform state
-- **Proxmox host setup** - assumed pre-configured
+- **Kubernetes workloads** — that's ArgoCD's job
+- **Proxmox host setup** — assumed pre-configured (dnsmasq, bridges, tools)
+- **WireGuard** — manual or separate automation
 
 ---
 
-## 6. GitOps (ArgoCD) Scope
+## 6. Network
 
-Only what's needed:
+- **Internal network**: 10.10.0.0/24 (Proxmox vmbr1)
+- **DHCP**: dnsmasq on vmbr1 with MAC-based leases + hostnames
+- **Gateway/DNS**: 10.10.0.1 (Proxmox host)
+- **Public ports** (via port forwarding): 80, 443, 1883, 8883
+
+---
+
+## 7. Node Definitions
+
+| Node     | VMID | IP         | vCPU | RAM   | Boot | Longhorn |
+|----------|------|------------|------|-------|------|----------|
+| cp-0     | 110  | 10.10.0.10 | 2    | 4 GB  | 20G  | -        |
+| worker-0 | 120  | 10.10.0.20 | 4    | 8 GB  | 20G  | 20G      |
+| worker-1 | 121  | 10.10.0.21 | 4    | 8 GB  | 20G  | 20G      |
+
+---
+
+## 8. Deployment Flow
+
+```bash
+# From infra-proxmox/ansible/ directory:
+
+# Deploy everything (~5 minutes)
+ansible-playbook site.yml
+
+# Tear down (stop + destroy VMs)
+ansible-playbook destroy.yml
+```
+
+### Prerequisites on Proxmox host:
+- dnsmasq configured on vmbr1 with MAC-based DHCP + hostnames
+- `talosctl`, `kubectl`, `helm` installed
+- SSH key auth from laptop
+
+### Prerequisites on laptop:
+- `ansible-core` via pipx with `proxmoxer`, `requests`, `requests-toolbelt` injected
+- `community.proxmox` collection installed
+
+---
+
+## 9. Key Lessons (see EXPERIENCE.md for full details)
+
+1. **Cilium post-bootstrap via Helm** — simpler than inline manifests
+2. **No hostname in Talos patches** — dnsmasq DHCP conflict with Talos v1.12.4
+3. **Proxmox API modules on localhost** — `delegate_to: localhost` for proxmoxer
+4. **talosctl/helm on Proxmox host** — VMs not reachable from laptop
+5. **Factory image with extensions** — iscsi-tools, util-linux-tools for Longhorn
+6. **Secrets idempotency** — check both local and remote before generating
+
+---
+
+## 10. Future: GitOps (ArgoCD) Scope
 
 | App | Purpose |
 |-----|---------|
-| **Cilium** | CNI (installed via Talos inline manifest first) |
+| **Cilium** | CNI (managed by ArgoCD after initial Helm install) |
 | **Longhorn** | Storage |
-| **Traefik** | Ingress + TLS (ACME/Let's Encrypt built-in) |
+| **Traefik** | Ingress + TLS |
 | **VictoriaMetrics** | Monitoring |
 | **Loki** | Logs |
 | **CloudNativePG** | PostgreSQL |
@@ -117,63 +197,8 @@ Only what's needed:
 
 ---
 
-## 7. Network
+## 11. Open Questions
 
-- **Internal network**: 10.20.0.0/24 (Proxmox vmbr1)
-- **Public ports** (via port forwarding):
-  - 80, 443 → Traefik
-  - 1883, 8883 → RabbitMQ (MQTT)
-- **Management**: WireGuard VPN (not managed by this repo)
-
----
-
-## 8. Deployment Flow
-
-```bash
-# 1. Set env vars (Proxmox token)
-export PROXMOX_API_URL="https://proxmox:8006/api2/json"
-export PROXMOX_API_TOKEN_ID="terraform@pam!deployer"
-export PROXMOX_API_TOKEN_SECRET="uuid..."
-
-# 2. One command
-cd infra-proxmox
-terraform init
-terraform apply
-
-# 3. Get kubeconfig (Terraform output or from Talos)
-export KUBECONFIG=$(terraform output -raw kubeconfig)
-
-# 4. Access ArgoCD
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
-```
-
----
-
-## 9. Key Lessons from EXPERIENCE.md Integrated
-
-1. **Cilium embedded in Talos** - Not applied via ArgoCD (chicken-and-egg)
-2. **Kubelet cert approver** - Auto-approves serving certs
-3. **PodSecurity labels** - For Longhorn, monitoring namespaces
-4. **Factory image** - For Talos extensions (iscsi-tools, util-linux-tools)
-5. **VictoriaMetrics** - Lower resource than Prometheus
-
----
-
-## 10. Open Questions
-
-1. **Database**: Need all of CloudNativePG + ScyllaDB + RabbitMQ? Or simplify?
-2. **Secrets**: Same repo with SOPS, or separate?
-3. **Terraform state**: Local OK for laptop, remote for production?
-4. **CI/CD**: Manual `terraform apply` or GitHub Actions?
-
----
-
-## 11. Next Steps
-
-Please tell me:
-1. Is this simpler approach acceptable?
-2. What components from section 6 do you actually need?
-3. Any other simplifications?
-
-Then I'll implement the actual code.
+1. **Secrets**: Same repo with SOPS, or separate?
+2. **CI/CD**: Manual `ansible-playbook` or GitHub Actions?
+3. **Multi-host**: How to handle multiple Proxmox hosts (Phase 3)?
