@@ -42,7 +42,7 @@
     cpu: x86-64-v2-AES
     memory: "{{ item.memory }}"
     balloon: 0
-    agent: "enabled=0"
+    agent: "enabled=1"
     net:
       net0: "virtio={{ item.mac }},bridge={{ vm_bridge }},firewall=0"
     scsi:
@@ -83,7 +83,7 @@
     cpu: x86-64-v2-AES
     memory: "{{ item.memory }}"
     balloon: 0
-    agent: "enabled=0"
+    agent: "enabled=1"
     net:
       net0: "virtio={{ item.mac }},bridge={{ vm_bridge }},firewall=0"
     scsi:

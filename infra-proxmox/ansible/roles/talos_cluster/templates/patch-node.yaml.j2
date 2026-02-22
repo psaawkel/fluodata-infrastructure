@@ -3,9 +3,14 @@
 machine:
   network:
     interfaces:
-      - interface: eth0
+      - deviceSelector:
+          physical: true
         addresses:
           - {{ item.ip }}/{{ vm_subnet_mask }}
+{% if item.name in controlplane_nodes | map(attribute='name') | list and cluster_vip is defined %}
+        vip:
+          ip: {{ cluster_vip }}
+{% endif %}
         routes:
           - network: 0.0.0.0/0
             gateway: {{ vm_gateway }}
@@ -15,3 +20,4 @@ machine:
 {% endfor %}
   install:
     disk: /dev/sda
+    image: {{ talos_install_image }}

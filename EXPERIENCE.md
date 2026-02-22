@@ -47,6 +47,25 @@ These are hard-won lessons — every item below was discovered through actual de
 - Fix: assign deterministic MAC addresses to VMs and use MAC-based DHCP leases.
 - **Hostname conflict (Talos v1.12.4)**: When dnsmasq sends a hostname via DHCP, `talosctl apply-config` rejects configs containing `machine.network.hostname`. Omit hostname from config patches entirely; let dnsmasq handle it.
 
+### Virtual IP (VIP) for control plane
+
+- Talos has built-in VIP support — no external load balancer needed.
+- Config: `machine.network.interfaces[].vip.ip` on control plane nodes only.
+- Talos handles leader election internally; VIP is assigned to one CP node at a time using gratuitous ARP.
+- **CRITICAL: `interface: eth0` does NOT work with VIP**. Talos maps `eth0` to the physical interface (e.g., `ens18`) for address assignment, but the VIP operator looks for link `eth0` which never comes up as a physical link. VIP silently fails to activate.
+- **Fix: Use `deviceSelector: { physical: true }` instead of `interface: eth0`**. This resolves to the actual physical interface name and the VIP operator gets the correct link.
+- VIP address should be on the same subnet as node IPs but outside DHCP range and outside node IP range.
+- VIP only activates after etcd is healthy and the K8s API server is running.
+- `guestAgent` is NOT a valid Talos `machine.features` field — it's a Proxmox VM setting. Including it in Talos config patches causes `talosctl gen config` to fail with "unknown keys".
+
+### Factory installer image for extensions (CRITICAL)
+
+- The factory ISO boots with extensions from the schematic, but when Talos installs to disk, `machine.install.image` defaults to stock `ghcr.io/siderolabs/installer` which has NO extensions.
+- **Fix**: Set `machine.install.image: factory.talos.dev/installer/<schematic_id>:<version>` in per-node config patches.
+- **Verified working**: All 3 nodes show extensions loaded after deploy with factory installer image:
+  - `iscsi-tools` v0.2.0, `util-linux-tools` 2.41.2, `qemu-guest-agent` 10.2.0
+  - `qm agent <vmid> ping` succeeds on all 3 VMs (guest agent communicating with Proxmox).
+
 ### Deprecated fields (Talos 1.9.2+)
 
 - `machine.install.extensions` — use factory image URL instead.
@@ -187,6 +206,12 @@ These scrapers must be disabled — Talos doesn't expose their metrics endpoints
 - `secrets.yaml` is generated once via `talosctl gen secrets` and reused across deploys (idempotent — skipped if exists).
 - Talos configs are regenerated from secrets + patches every run (idempotent — same secrets produce same certs).
 - Must check both local AND remote for existing secrets — they may exist on Proxmox from a prior run but not locally.
+
+### talosconfig empty endpoints
+
+- `talosctl gen config` produces a talosconfig with `endpoints: []` — talosctl commands fail with "failed to determine endpoints" unless `-e` is specified every time.
+- Fix: after generating talosconfig, run `talosctl config endpoint <VIP_or_CP_IP>` and `talosctl config nodes <CP_IPs>` to set defaults.
+- During Ansible deploy, bootstrap/apply commands specify `--endpoints` explicitly, so the empty endpoints only affect post-deploy usage.
 
 ---
 

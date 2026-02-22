@@ -11,16 +11,18 @@ proxmox_api_token_secret: b5cdc654-9794-4cf2-9011-1590f1c15de3
 # Talos
 # =============================================================================
 talos_version: v1.12.4
-talos_schematic_id: ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
 talos_iso_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/nocloud-amd64.iso"
 talos_iso_filename: "talos-{{ talos_version }}.iso"
 talos_iso_storage: local
+talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
 
 # =============================================================================
 # Cluster
 # =============================================================================
 cluster_name: fluodata
-cluster_endpoint: "https://10.10.0.10:6443"
+cluster_vip: 10.10.0.5
+cluster_endpoint: "https://{{ cluster_vip }}:6443"
 
 # Directory on Proxmox host for talosctl work
 talos_remote_dir: /tmp/talos-deploy

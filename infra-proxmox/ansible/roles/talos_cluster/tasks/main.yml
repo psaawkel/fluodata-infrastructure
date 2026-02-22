@@ -114,6 +114,21 @@
         --talos-version {{ talos_version }}
         --force
 
+# talosctl gen config produces talosconfig with empty endpoints.
+# Set endpoint to VIP (or first CP) so talosctl works without -e after deploy.
+# During setup, bootstrap/apply commands specify --endpoints explicitly.
+- name: Set talosconfig endpoint
+  ansible.builtin.command:
+    cmd: >-
+      talosctl --talosconfig {{ talos_remote_dir }}/talosconfig
+        config endpoint {{ cluster_vip | default(controlplane_nodes[0].ip) }}
+
+- name: Set talosconfig default nodes
+  ansible.builtin.command:
+    cmd: >-
+      talosctl --talosconfig {{ talos_remote_dir }}/talosconfig
+        config nodes {{ controlplane_nodes | map(attribute='ip') | join(' ') }}
+
 # --- Wait for VMs to reach Talos maintenance mode ---
 - name: Wait for Talos API on all nodes (port 50000)
   ansible.builtin.wait_for:
@@ -178,21 +193,23 @@
     - "'AlreadyExists' not in bootstrap_result.stderr"
 
 # --- Wait for Kubernetes API ---
+# With VIP, wait on the VIP address; without VIP, fall back to first CP node
 - name: Wait for Kubernetes API (port 6443)
   ansible.builtin.wait_for:
-    host: "{{ controlplane_nodes[0].ip }}"
+    host: "{{ cluster_vip | default(controlplane_nodes[0].ip) }}"
     port: 6443
     timeout: 300
     delay: 15
 
 # --- Fetch kubeconfig ---
+# Use VIP for endpoints so kubeconfig works regardless of which CP node is up
 - name: Generate kubeconfig
   ansible.builtin.command:
     cmd: >-
       talosctl kubeconfig {{ talos_remote_dir }}/kubeconfig
         --talosconfig {{ talos_remote_dir }}/talosconfig
         --nodes {{ controlplane_nodes[0].ip }}
-        --endpoints {{ controlplane_nodes[0].ip }}
+        --endpoints {{ cluster_vip | default(controlplane_nodes[0].ip) }}
         --force
 
 - name: Fetch kubeconfig to local
