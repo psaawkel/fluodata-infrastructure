@@ -172,6 +172,14 @@ These scrapers must be disabled — Talos doesn't expose their metrics endpoints
 
 - If Terraform/Ansible/API tasks die mid-operation, lock files at `/var/lock/qemu-server/lock-<vmid>.conf` must be manually removed before VMs can be destroyed or modified.
 
+### Boot order: ISO vs disk (CRITICAL)
+
+- VMs must boot from ISO (`order=ide2;scsi0`) for initial Talos install, but **after Talos installs to disk**, boot order must switch to disk-first (`order=scsi0`) and the ISO should be detached.
+- If the ISO stays first in boot order and the host suspends/resumes (or VMs reboot for any reason), Talos boots from ISO again and halts with: `"Talos already installed to disk but booted from another media and talos.halt_if_installed kernel parameter is set"`.
+- The cluster will NOT come back up until boot order is fixed and VMs are force-stopped + restarted.
+- **Fix**: After Talos applies config and reboots to disk, run `qm set <vmid> --boot order=scsi0 --ide2 none,media=cdrom` on each VM.
+- Ansible automation: add this as a post-install step in the `talos_cluster` role, after waiting for nodes to reboot.
+
 ---
 
 ## Ansible (Infrastructure as Code)

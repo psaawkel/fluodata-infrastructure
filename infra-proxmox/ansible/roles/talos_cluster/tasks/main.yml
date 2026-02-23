@@ -178,6 +178,20 @@
   loop_control:
     label: "{{ item.name }}"
 
+# --- Switch boot order to disk-first and detach ISO ---
+# After Talos installs to disk, the ISO must not be first in boot order.
+# If the host suspends/resumes, VMs reboot — booting from ISO again causes
+# "halt_if_installed" and the cluster won't come back up.
+- name: Switch boot order to disk-first and detach ISO
+  ansible.builtin.command:
+    cmd: >-
+      qm set {{ item.vmid }}
+        --boot order=scsi0
+        --ide2 none,media=cdrom
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 # --- Bootstrap the cluster ---
 - name: Bootstrap etcd on first control plane
   ansible.builtin.command:
