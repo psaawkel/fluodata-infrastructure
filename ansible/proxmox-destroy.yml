@@ -55,3 +55,8 @@
       delegate_to: localhost
       become: false
       ignore_errors: true
+
+    - name: Clean up remote work directory
+      ansible.builtin.file:
+        path: "/tmp/talos-deploy/{{ env_dir | basename }}"
+        state: absent

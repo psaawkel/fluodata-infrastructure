@@ -14,9 +14,10 @@
 # =============================================================================
 
 # --- Determine remote work dir for Proxmox ---
+# Per-environment dir prevents secret/config leakage between environments
 - name: Set remote work directory (Proxmox)
   ansible.builtin.set_fact:
-    _talos_remote_dir: /tmp/talos-deploy
+    _talos_remote_dir: "/tmp/talos-deploy/{{ env_dir | basename }}"
   when: talosctl_delegate_to is not defined
 
 - name: Set remote work directory (VPS / localhost)
