@@ -1,0 +1,60 @@
+# =============================================================================
+# OVH VPS environment config — EXAMPLE
+#
+# Copy this folder and fill in your values:
+#   cd environments
+#   cp -r ovh-example/ ovh-prod/
+#   vim ovh-prod/config.yml
+#
+# Deploy:
+#   cd ansible
+#   ansible-playbook deploy-ovh.yml -e env=../environments/ovh-prod
+#
+# Destroy:
+#   ansible-playbook destroy-ovh.yml -e env=../environments/ovh-prod
+# =============================================================================
+
+# --- Platform ---
+# Must be "proxmox" or "ovh". Controls which roles run and validates config.
+platform: ovh
+
+# --- Talos ---
+talos_version: v1.12.4
+# Schematic ID from factory.talos.dev (includes extensions: iscsi-tools, util-linux-tools)
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
+talos_install_disk: /dev/sda
+
+# --- Cluster ---
+cluster_name: fluodata
+# No VIP on OVH — no shared L2 for gratuitous ARP.
+# cluster_vip is intentionally NOT set. API endpoint uses first CP node IP.
+
+# --- Network ---
+# OVH public network — each node has a public IP assigned by OVH.
+# Gateway is the OVH-assigned gateway for your IP block.
+vm_gateway: REPLACE_WITH_OVH_GATEWAY
+vm_subnet_mask: 32
+vm_nameservers:
+  - 213.186.33.99
+  - 1.1.1.1
+
+# --- Nodes ---
+# All 3 nodes are combined controlplane + worker.
+# Each needs: name, ip (public IP assigned by OVH)
+# For rescue mode install, also: rescue_ssh_host (same as ip usually), rescue_ssh_user (root)
+controlplane_nodes:
+  - name: node-0
+    ip: REPLACE_WITH_VPS_0_PUBLIC_IP
+    rescue_ssh_host: REPLACE_WITH_VPS_0_PUBLIC_IP
+  - name: node-1
+    ip: REPLACE_WITH_VPS_1_PUBLIC_IP
+    rescue_ssh_host: REPLACE_WITH_VPS_1_PUBLIC_IP
+  - name: node-2
+    ip: REPLACE_WITH_VPS_2_PUBLIC_IP
+    rescue_ssh_host: REPLACE_WITH_VPS_2_PUBLIC_IP
+
+# No dedicated workers — all nodes are combined CP+worker
+worker_nodes: []
+
+# --- Cilium ---
+cilium_version: "1.17.3"

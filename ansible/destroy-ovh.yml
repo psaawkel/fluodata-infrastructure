@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# destroy-ovh.yml — Reset Talos cluster on OVH VPS
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook destroy-ovh.yml -e env=../environments/ovh-prod
+#
+# This resets Talos nodes (wipes etcd + Kubernetes state).
+# To fully decommission, cancel the VPS in OVH panel.
+# =============================================================================
+
+# --- Load config ---
+- name: Load environment config
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Fail if env is not specified
+      ansible.builtin.fail:
+        msg: "Specify environment: ansible-playbook destroy-ovh.yml -e env=../environments/ovh-prod"
+      when: env is not defined
+
+    - name: Resolve env_dir to absolute path
+      ansible.builtin.set_fact:
+        env_dir: "{{ (playbook_dir ~ '/' ~ env) | realpath }}"
+
+    - name: Load config.yml
+      ansible.builtin.include_vars:
+        file: "{{ env_dir }}/config.yml"
+
+    - name: Validate platform is OVH
+      ansible.builtin.fail:
+        msg: "This playbook is for OVH environments. config.yml has platform='{{ platform | default('undefined') }}'"
+      when: platform | default('') != 'ovh'
+
+    - name: Set computed variables
+      ansible.builtin.set_fact:
+        env_dir: "{{ env_dir }}"
+        controlplane_nodes: "{{ controlplane_nodes }}"
+        worker_nodes: "{{ worker_nodes | default([]) }}"
+        all_nodes: "{{ controlplane_nodes + (worker_nodes | default([])) }}"
+
+    - name: Show destroy info
+      ansible.builtin.debug:
+        msg: |
+          Env folder:  {{ env_dir }}
+          Nodes:       {{ all_nodes | map(attribute='name') | join(', ') }}
+
+# --- Reset nodes ---
+- name: Reset Talos cluster
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Reset all nodes
+      ansible.builtin.command:
+        cmd: >-
+          talosctl reset
+            --talosconfig {{ env_dir }}/talosconfig
+            --nodes {{ item.ip }}
+            --endpoints {{ item.ip }}
+            --graceful=false
+            --reboot
+      loop: "{{ all_nodes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      ignore_errors: true

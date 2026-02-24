@@ -2,9 +2,20 @@
 # =============================================================================
 # Role: cilium — Install Cilium CNI via Helm
 #
-# Platform-agnostic. Runs on {{ talosctl_delegate_to | default(inventory_host) }}.
+# Platform-agnostic. Uses kubeconfig from the work directory.
 # Nodes are NotReady until Cilium deploys — this is expected.
 # =============================================================================
+
+# Determine where kubeconfig is (same logic as talos_bootstrap)
+- name: Set remote work directory (Proxmox)
+  ansible.builtin.set_fact:
+    _talos_remote_dir: /tmp/talos-deploy
+  when: talosctl_delegate_to is not defined
+
+- name: Set remote work directory (OVH / localhost)
+  ansible.builtin.set_fact:
+    _talos_remote_dir: "{{ env_dir }}"
+  when: talosctl_delegate_to is defined
 
 - name: Add Cilium Helm repo
   ansible.builtin.command:
@@ -15,7 +26,7 @@
     - helm_repo_result.rc != 0
     - "'already exists' not in helm_repo_result.stderr"
   environment:
-    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
 
@@ -23,7 +34,7 @@
   ansible.builtin.command:
     cmd: helm repo update
   environment:
-    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
 
@@ -44,7 +55,7 @@
         --wait
         --timeout 5m
   environment:
-    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
   register: cilium_result
   changed_when: "'STATUS: deployed' in cilium_result.stdout"
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
@@ -56,11 +67,11 @@
       kubectl get nodes
         -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
   environment:
-    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
   register: nodes_ready
   until: >-
     nodes_ready.stdout_lines | select('equalto', 'True') | list | length
-    == (controlplane_nodes | length + worker_nodes | length)
+    == (controlplane_nodes | length + (worker_nodes | default([]) | length))
   retries: 30
   delay: 10
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
@@ -70,7 +81,7 @@
   ansible.builtin.command:
     cmd: kubectl get nodes -o wide
   environment:
-    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
   register: cluster_status
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false

@@ -4,96 +4,93 @@
 #
 # Platform-agnostic. Works for both Proxmox and OVH.
 #
-# talosctl/kubectl/helm commands run on {{ talosctl_host }}:
-#   - Proxmox: the Proxmox host (VMs on internal vmbr1, unreachable from laptop)
-#   - OVH: localhost (VPS nodes have public/vRack IPs, reachable directly)
+# Key variables:
+#   - env_dir:              Local env folder — all final files end up here
+#   - talos_work_dir:       Where talosctl runs. For OVH = env_dir. For Proxmox = remote tmp dir.
+#   - talosctl_delegate_to: undefined = run on inventory host (Proxmox), "localhost" = run locally (OVH)
 #
-# Required variables (set in environment group_vars):
-#   - cluster_name, cluster_endpoint, cluster_vip
-#   - talos_version, talos_install_image
-#   - controlplane_nodes, worker_nodes, all_nodes
-#   - talos_work_dir       (where talosctl runs: /tmp/talos-deploy or local path)
-#   - talos_local_dir      (local dir for secrets/kubeconfig persistence)
-#   - talosctl_delegate_to (undefined=run on inventory host, "localhost"=run locally)
-#   - vm_gateway, vm_subnet_mask, vm_nameservers (network config for patches)
+# Proxmox flow: talosctl runs on Proxmox host (remote), results fetched to env_dir
+# OVH flow:     talosctl runs locally, talos_work_dir = env_dir, no fetching needed
 # =============================================================================
 
-# --- Create work directory ---
-- name: Create work directory
+# --- Determine remote work dir for Proxmox ---
+- name: Set remote work directory (Proxmox)
+  ansible.builtin.set_fact:
+    _talos_remote_dir: /tmp/talos-deploy
+  when: talosctl_delegate_to is not defined
+
+- name: Set remote work directory (OVH / localhost)
+  ansible.builtin.set_fact:
+    _talos_remote_dir: "{{ env_dir }}"
+  when: talosctl_delegate_to is defined
+
+# --- Create directories ---
+- name: Create remote work directory
   ansible.builtin.file:
-    path: "{{ talos_work_dir }}"
+    path: "{{ _talos_remote_dir }}"
     state: directory
     mode: "0700"
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
 
-# --- Create local talos directory ---
-- name: Create local talos directory
+- name: Create local env directory
   ansible.builtin.file:
-    path: "{{ talos_local_dir }}"
+    path: "{{ env_dir }}"
     state: directory
     mode: "0700"
   delegate_to: localhost
   become: false
+  when: talosctl_delegate_to is not defined
 
 # =============================================================================
 # Secrets generation (idempotent — generated once, reused across deploys)
 # =============================================================================
-- name: Check if secrets exist locally
+- name: Check if secrets exist in env dir
   ansible.builtin.stat:
-    path: "{{ talos_local_dir }}/secrets.yaml"
+    path: "{{ env_dir }}/secrets.yaml"
   register: secrets_local_stat
   delegate_to: localhost
   become: false
 
-- name: Check if secrets exist in work directory
+- name: Check if secrets exist in remote work dir
   ansible.builtin.stat:
-    path: "{{ talos_work_dir }}/secrets.yaml"
+    path: "{{ _talos_remote_dir }}/secrets.yaml"
   register: secrets_remote_stat
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
+  when: talosctl_delegate_to is not defined
 
 - name: Generate Talos secrets
   ansible.builtin.command:
     cmd: >-
       talosctl gen secrets
-        --output-file {{ talos_work_dir }}/secrets.yaml
+        --output-file {{ _talos_remote_dir }}/secrets.yaml
         --talos-version {{ talos_version }}
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
-  when: not secrets_local_stat.stat.exists and not secrets_remote_stat.stat.exists
+  when: >-
+    not secrets_local_stat.stat.exists
+    and (talosctl_delegate_to is defined or not secrets_remote_stat.stat.exists)
 
-- name: Fetch secrets to local (from newly generated or pre-existing remote)
+- name: Copy secrets to remote work dir (from env dir)
+  ansible.builtin.copy:
+    src: "{{ env_dir }}/secrets.yaml"
+    dest: "{{ _talos_remote_dir }}/secrets.yaml"
+    mode: "0600"
+  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
+  become: false
+  when:
+    - secrets_local_stat.stat.exists
+    - talosctl_delegate_to is not defined
+
+- name: Fetch secrets to env dir (Proxmox — newly generated)
   ansible.builtin.fetch:
-    src: "{{ talos_work_dir }}/secrets.yaml"
-    dest: "{{ talos_local_dir }}/secrets.yaml"
+    src: "{{ _talos_remote_dir }}/secrets.yaml"
+    dest: "{{ env_dir }}/secrets.yaml"
     flat: true
   when:
     - not secrets_local_stat.stat.exists
     - talosctl_delegate_to is not defined
-  # Only fetch when running on remote host; if localhost, work_dir IS local
-
-- name: Copy work dir secrets to local (localhost mode)
-  ansible.builtin.copy:
-    src: "{{ talos_work_dir }}/secrets.yaml"
-    dest: "{{ talos_local_dir }}/secrets.yaml"
-    mode: "0600"
-    remote_src: true
-  delegate_to: localhost
-  become: false
-  when:
-    - not secrets_local_stat.stat.exists
-    - talosctl_delegate_to is defined and talosctl_delegate_to == "localhost"
-    - talos_work_dir != talos_local_dir
-
-- name: Copy secrets to work directory (if already existed locally)
-  ansible.builtin.copy:
-    src: "{{ talos_local_dir }}/secrets.yaml"
-    dest: "{{ talos_work_dir }}/secrets.yaml"
-    mode: "0600"
-  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
-  become: false
-  when: secrets_local_stat.stat.exists
 
 # =============================================================================
 # Generate config patches from templates
@@ -101,7 +98,7 @@
 - name: Generate control plane common patch
   ansible.builtin.template:
     src: patch-cp-common.yaml.j2
-    dest: "{{ talos_work_dir }}/patch-cp-common.yaml"
+    dest: "{{ _talos_remote_dir }}/patch-cp-common.yaml"
     mode: "0600"
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
@@ -109,7 +106,7 @@
 - name: Generate worker common patch
   ansible.builtin.template:
     src: patch-worker-common.yaml.j2
-    dest: "{{ talos_work_dir }}/patch-worker-common.yaml"
+    dest: "{{ _talos_remote_dir }}/patch-worker-common.yaml"
     mode: "0600"
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
@@ -117,7 +114,7 @@
 - name: Generate per-node patches
   ansible.builtin.template:
     src: patch-node.yaml.j2
-    dest: "{{ talos_work_dir }}/patch-{{ item.name }}.yaml"
+    dest: "{{ _talos_remote_dir }}/patch-{{ item.name }}.yaml"
     mode: "0600"
   loop: "{{ all_nodes }}"
   loop_control:
@@ -132,9 +129,9 @@
   ansible.builtin.command:
     cmd: >-
       talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
-        --with-secrets {{ talos_work_dir }}/secrets.yaml
-        --config-patch @{{ talos_work_dir }}/patch-cp-common.yaml
-        --output {{ talos_work_dir }}/controlplane.yaml
+        --with-secrets {{ _talos_remote_dir }}/secrets.yaml
+        --config-patch @{{ _talos_remote_dir }}/patch-cp-common.yaml
+        --output {{ _talos_remote_dir }}/controlplane.yaml
         --output-types controlplane
         --talos-version {{ talos_version }}
         --force
@@ -145,21 +142,22 @@
   ansible.builtin.command:
     cmd: >-
       talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
-        --with-secrets {{ talos_work_dir }}/secrets.yaml
-        --config-patch @{{ talos_work_dir }}/patch-worker-common.yaml
-        --output {{ talos_work_dir }}/worker.yaml
+        --with-secrets {{ _talos_remote_dir }}/secrets.yaml
+        --config-patch @{{ _talos_remote_dir }}/patch-worker-common.yaml
+        --output {{ _talos_remote_dir }}/worker.yaml
         --output-types worker
         --talos-version {{ talos_version }}
         --force
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
+  when: (worker_nodes | default([])) | length > 0
 
 - name: Generate talosconfig
   ansible.builtin.command:
     cmd: >-
       talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
-        --with-secrets {{ talos_work_dir }}/secrets.yaml
-        --output {{ talos_work_dir }}/talosconfig
+        --with-secrets {{ _talos_remote_dir }}/secrets.yaml
+        --output {{ _talos_remote_dir }}/talosconfig
         --output-types talosconfig
         --talos-version {{ talos_version }}
         --force
@@ -170,7 +168,7 @@
 - name: Set talosconfig endpoint
   ansible.builtin.command:
     cmd: >-
-      talosctl --talosconfig {{ talos_work_dir }}/talosconfig
+      talosctl --talosconfig {{ _talos_remote_dir }}/talosconfig
         config endpoint {{ cluster_vip | default(controlplane_nodes[0].ip) }}
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
@@ -178,7 +176,7 @@
 - name: Set talosconfig default nodes
   ansible.builtin.command:
     cmd: >-
-      talosctl --talosconfig {{ talos_work_dir }}/talosconfig
+      talosctl --talosconfig {{ _talos_remote_dir }}/talosconfig
         config nodes {{ controlplane_nodes | map(attribute='ip') | join(' ') }}
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
@@ -205,8 +203,8 @@
         --insecure
         --nodes {{ item.ip }}
         --endpoints {{ item.ip }}
-        --config-patch @{{ talos_work_dir }}/patch-{{ item.name }}.yaml
-        --file {{ talos_work_dir }}/controlplane.yaml
+        --config-patch @{{ _talos_remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ _talos_remote_dir }}/controlplane.yaml
   loop: "{{ controlplane_nodes }}"
   loop_control:
     label: "{{ item.name }}"
@@ -220,13 +218,14 @@
         --insecure
         --nodes {{ item.ip }}
         --endpoints {{ item.ip }}
-        --config-patch @{{ talos_work_dir }}/patch-{{ item.name }}.yaml
-        --file {{ talos_work_dir }}/worker.yaml
-  loop: "{{ worker_nodes }}"
+        --config-patch @{{ _talos_remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ _talos_remote_dir }}/worker.yaml
+  loop: "{{ worker_nodes | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
+  when: (worker_nodes | default([])) | length > 0
 
 # =============================================================================
 # Wait for reboot, bootstrap, kubeconfig
@@ -247,7 +246,7 @@
   ansible.builtin.command:
     cmd: >-
       talosctl bootstrap
-        --talosconfig {{ talos_work_dir }}/talosconfig
+        --talosconfig {{ _talos_remote_dir }}/talosconfig
         --nodes {{ controlplane_nodes[0].ip }}
         --endpoints {{ controlplane_nodes[0].ip }}
   register: bootstrap_result
@@ -269,49 +268,53 @@
 - name: Generate kubeconfig
   ansible.builtin.command:
     cmd: >-
-      talosctl kubeconfig {{ talos_work_dir }}/kubeconfig
-        --talosconfig {{ talos_work_dir }}/talosconfig
+      talosctl kubeconfig {{ _talos_remote_dir }}/kubeconfig
+        --talosconfig {{ _talos_remote_dir }}/talosconfig
         --nodes {{ controlplane_nodes[0].ip }}
         --endpoints {{ cluster_vip | default(controlplane_nodes[0].ip) }}
         --force
   delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
   become: false
 
-# --- Fetch generated files to local ---
-- name: Fetch kubeconfig to local
+# =============================================================================
+# Fetch all generated files to env dir (Proxmox only — OVH already local)
+# =============================================================================
+- name: Fetch generated files to env dir
   ansible.builtin.fetch:
-    src: "{{ talos_work_dir }}/kubeconfig"
-    dest: "{{ talos_local_dir }}/kubeconfig"
+    src: "{{ _talos_remote_dir }}/{{ item }}"
+    dest: "{{ env_dir }}/{{ item }}"
     flat: true
+  loop:
+    - talosconfig
+    - kubeconfig
+    - controlplane.yaml
+    - patch-cp-common.yaml
   when: talosctl_delegate_to is not defined
 
-- name: Fetch talosconfig to local
+- name: Fetch worker config to env dir
   ansible.builtin.fetch:
-    src: "{{ talos_work_dir }}/talosconfig"
-    dest: "{{ talos_local_dir }}/talosconfig"
+    src: "{{ _talos_remote_dir }}/worker.yaml"
+    dest: "{{ env_dir }}/worker.yaml"
     flat: true
+  when:
+    - talosctl_delegate_to is not defined
+    - (worker_nodes | default([])) | length > 0
+
+- name: Fetch per-node patches to env dir
+  ansible.builtin.fetch:
+    src: "{{ _talos_remote_dir }}/patch-{{ item.name }}.yaml"
+    dest: "{{ env_dir }}/patch-{{ item.name }}.yaml"
+    flat: true
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
   when: talosctl_delegate_to is not defined
 
-- name: Copy kubeconfig to local (localhost mode)
-  ansible.builtin.copy:
-    src: "{{ talos_work_dir }}/kubeconfig"
-    dest: "{{ talos_local_dir }}/kubeconfig"
-    mode: "0600"
-    remote_src: true
-  delegate_to: localhost
-  become: false
+- name: Fetch worker common patch to env dir
+  ansible.builtin.fetch:
+    src: "{{ _talos_remote_dir }}/patch-worker-common.yaml"
+    dest: "{{ env_dir }}/patch-worker-common.yaml"
+    flat: true
   when:
-    - talosctl_delegate_to is defined and talosctl_delegate_to == "localhost"
-    - talos_work_dir != talos_local_dir
-
-- name: Copy talosconfig to local (localhost mode)
-  ansible.builtin.copy:
-    src: "{{ talos_work_dir }}/talosconfig"
-    dest: "{{ talos_local_dir }}/talosconfig"
-    mode: "0600"
-    remote_src: true
-  delegate_to: localhost
-  become: false
-  when:
-    - talosctl_delegate_to is defined and talosctl_delegate_to == "localhost"
-    - talos_work_dir != talos_local_dir
+    - talosctl_delegate_to is not defined
+    - (worker_nodes | default([])) | length > 0
