@@ -2,6 +2,15 @@
 # tasks/validate-vps.yml — Validate VPS config and set computed variables
 #
 # Prerequisite: tasks/load-config.yml must run first
+#
+# Network settings (gateway, subnet_mask, nameservers, install_disk) are
+# auto-detected from rescue mode by the vps_detect role and saved as
+# node-facts-<name>.yml in env_dir. Config.yml values override detected values.
+#
+# Node `host` field: hostname or IPv4 address to connect to.
+# Node `ip` field: (optional) static IPv4 for Talos config.
+#   - If host is an IPv4 and ip is not set, ip defaults to host.
+#   - If host is a hostname, ip must be set explicitly.
 
 - name: Validate platform is vps
   ansible.builtin.fail:
@@ -16,43 +25,76 @@
     - talos_version
     - talos_schematic_id
     - controlplane_nodes
-    - vm_gateway
   when: lookup('vars', item, default='__MISSING__') == '__MISSING__'
+
+# Resolve ip for each node: if host is an IPv4, ip defaults to host.
+# If host is a hostname, ip must be explicitly set in config.yml.
+- name: Build enriched controlplane nodes
+  ansible.builtin.set_fact:
+    _enriched_cp_nodes: "{{ _enriched_cp_nodes | default([]) + [_enriched_node] }}"
+  vars:
+    _host_is_ipv4: "{{ item.host | default('') | regex_search('^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$') is not none }}"
+    _resolved_ip: "{{ item.ip | default(item.host if (_host_is_ipv4 | bool) else '') }}"
+    _enriched_node: "{{ item | combine({'ip': _resolved_ip}) }}"
+  loop: "{{ controlplane_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Build enriched worker nodes
+  ansible.builtin.set_fact:
+    _enriched_worker_nodes: "{{ _enriched_worker_nodes | default([]) + [_enriched_node] }}"
+  vars:
+    _host_is_ipv4: "{{ item.host | default('') | regex_search('^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$') is not none }}"
+    _resolved_ip: "{{ item.ip | default(item.host if (_host_is_ipv4 | bool) else '') }}"
+    _enriched_node: "{{ item | combine({'ip': _resolved_ip}) }}"
+  loop: "{{ worker_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: (worker_nodes | default([])) | length > 0
+
+- name: Validate all nodes have resolved IPs
+  ansible.builtin.fail:
+    msg: >-
+      Node {{ item.name }}: host '{{ item.host }}' is not an IPv4 address and no explicit 'ip' is set.
+      When using a hostname for 'host', you must also set 'ip' with the node's static IPv4 address.
+  loop: "{{ _enriched_cp_nodes + (_enriched_worker_nodes | default([])) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.ip | default('') == ''
 
 - name: Set computed variables
   ansible.builtin.set_fact:
     env_dir: "{{ env_dir }}"
     cluster_name: "{{ cluster_name }}"
-    cluster_endpoint: "{{ 'https://' ~ controlplane_nodes[0].ip ~ ':6443' }}"
+    cluster_endpoint: "{{ 'https://' ~ _enriched_cp_nodes[0].ip ~ ':6443' }}"
     talos_version: "{{ talos_version }}"
     talos_schematic_id: "{{ talos_schematic_id }}"
     talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
-    talos_install_disk: "{{ talos_install_disk | default('/dev/sda') }}"
     talos_metal_image_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/metal-amd64.raw.xz"
-    controlplane_nodes: "{{ controlplane_nodes }}"
-    worker_nodes: "{{ worker_nodes | default([]) }}"
-    all_nodes: "{{ controlplane_nodes + (worker_nodes | default([])) }}"
-    vm_gateway: "{{ vm_gateway }}"
-    vm_subnet_mask: "{{ vm_subnet_mask | default(32) }}"
-    vm_nameservers: "{{ vm_nameservers | default(['213.186.33.99', '1.1.1.1']) }}"
+    controlplane_nodes: "{{ _enriched_cp_nodes }}"
+    worker_nodes: "{{ _enriched_worker_nodes | default([]) }}"
+    all_nodes: "{{ _enriched_cp_nodes + (_enriched_worker_nodes | default([])) }}"
     cilium_version: "{{ cilium_version | default('1.17.3') }}"
     allow_scheduling_on_controlplanes: "{{ allow_scheduling_on_controlplanes | default((worker_nodes | default([])) | length == 0) }}"
 
 - name: Add rescue mode hosts to inventory
   ansible.builtin.add_host:
     name: "{{ item.name }}"
-    ansible_host: "{{ item.rescue_ssh_host | default(item.ip) }}"
+    ansible_host: "{{ item.host }}"
     ansible_user: "{{ item.rescue_ssh_user | default('root') }}"
     ansible_ssh_pass: "{{ item.rescue_ssh_pass | default(omit) }}"
     ansible_ssh_extra_args: >-
+      {{ '-4' if not (item.host | regex_search('^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')) else '' }}
       -o StrictHostKeyChecking=no
       -o UserKnownHostsFile=/dev/null
       {{ '-o PubkeyAuthentication=no' if item.rescue_ssh_pass is defined else '' }}
     groups: rescue_mode
-    # Pass vars needed by talos_install role
+    # Pass vars needed by vps_detect and talos_install roles
+    _node_ip: "{{ item.ip }}"
+    _env_dir: "{{ env_dir }}"
+    _node_config: "{{ item }}"
     talos_metal_image_url: "{{ talos_metal_image_url }}"
-    talos_install_disk: "{{ talos_install_disk }}"
-  loop: "{{ controlplane_nodes + (worker_nodes | default([])) }}"
+  loop: "{{ all_nodes }}"
   loop_control:
     label: "{{ item.name }}"
 

@@ -9,6 +9,7 @@
 # Required variables:
 #   - env_dir, cluster_name, cluster_endpoint, talos_version
 #   - controlplane_nodes, worker_nodes, all_nodes
+#   (each node has both `host` for connections and `ip` for Talos config)
 # =============================================================================
 
 # =============================================================================
@@ -16,7 +17,7 @@
 # =============================================================================
 - name: Wait for Talos API on all nodes (port 50000)
   ansible.builtin.wait_for:
-    host: "{{ item.ip }}"
+    host: "{{ item.host }}"
     port: 50000
     timeout: 300
     delay: 10
@@ -30,8 +31,8 @@
     cmd: >-
       talosctl version
         --talosconfig {{ env_dir }}/talosconfig
-        --nodes {{ controlplane_nodes[0].ip }}
-        --endpoints {{ controlplane_nodes[0].ip }}
+        --nodes {{ controlplane_nodes[0].host }}
+        --endpoints {{ controlplane_nodes[0].host }}
   register: _node_configured_check
   failed_when: false
   changed_when: false
@@ -46,8 +47,8 @@
     cmd: >-
       talosctl apply-config
         --insecure
-        --nodes {{ item.ip }}
-        --endpoints {{ item.ip }}
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
         --config-patch @{{ env_dir }}/patch-{{ item.name }}.yaml
         --file {{ env_dir }}/controlplane.yaml
   loop: "{{ controlplane_nodes }}"
@@ -60,8 +61,8 @@
     cmd: >-
       talosctl apply-config
         --insecure
-        --nodes {{ item.ip }}
-        --endpoints {{ item.ip }}
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
         --config-patch @{{ env_dir }}/patch-{{ item.name }}.yaml
         --file {{ env_dir }}/worker.yaml
   loop: "{{ worker_nodes | default([]) }}"
@@ -75,8 +76,8 @@
     cmd: >-
       talosctl apply-config
         --talosconfig {{ env_dir }}/talosconfig
-        --nodes {{ item.ip }}
-        --endpoints {{ item.ip }}
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
         --config-patch @{{ env_dir }}/patch-{{ item.name }}.yaml
         --file {{ env_dir }}/controlplane.yaml
   loop: "{{ controlplane_nodes }}"
@@ -89,8 +90,8 @@
     cmd: >-
       talosctl apply-config
         --talosconfig {{ env_dir }}/talosconfig
-        --nodes {{ item.ip }}
-        --endpoints {{ item.ip }}
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
         --config-patch @{{ env_dir }}/patch-{{ item.name }}.yaml
         --file {{ env_dir }}/worker.yaml
   loop: "{{ worker_nodes | default([]) }}"
@@ -103,7 +104,7 @@
 # =============================================================================
 - name: Wait for nodes to boot and Talos API to be ready
   ansible.builtin.wait_for:
-    host: "{{ item.ip }}"
+    host: "{{ item.host }}"
     port: 50000
     timeout: 300
     delay: "{{ 30 if _nodes_in_maintenance else 5 }}"
@@ -116,8 +117,8 @@
     cmd: >-
       talosctl bootstrap
         --talosconfig {{ env_dir }}/talosconfig
-        --nodes {{ controlplane_nodes[0].ip }}
-        --endpoints {{ controlplane_nodes[0].ip }}
+        --nodes {{ controlplane_nodes[0].host }}
+        --endpoints {{ controlplane_nodes[0].host }}
   register: bootstrap_result
   failed_when:
     - bootstrap_result.rc != 0
@@ -125,7 +126,7 @@
 
 - name: Wait for Kubernetes API (port 6443)
   ansible.builtin.wait_for:
-    host: "{{ cluster_vip | default(controlplane_nodes[0].ip) }}"
+    host: "{{ cluster_vip | default(controlplane_nodes[0].host) }}"
     port: 6443
     timeout: 300
     delay: 15
@@ -135,8 +136,8 @@
     cmd: >-
       talosctl kubeconfig {{ env_dir }}/kubeconfig
         --talosconfig {{ env_dir }}/talosconfig
-        --nodes {{ controlplane_nodes[0].ip }}
-        --endpoints {{ cluster_vip | default(controlplane_nodes[0].ip) }}
+        --nodes {{ controlplane_nodes[0].host }}
+        --endpoints {{ cluster_vip | default(controlplane_nodes[0].host) }}
         --force
 
 # Set kubeconfig_path for cilium role (runs next on same host)

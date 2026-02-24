@@ -4,12 +4,13 @@
 #
 # Usage:
 #   cd ansible
-#   ansible-playbook vps-deploy.yml -e env=../environments/vps-ovh-test
+#   ansible-playbook vps-deploy.yml -e env=../environments/vps-ovh-test1
 #
 # Prerequisites:
 #   1. Talos written to disk (run vps-deploy-rescue.yml first, one-time)
 #   2. VPS rebooted into normal boot mode (Talos running in maintenance mode)
-#   3. talosctl, kubectl, helm installed locally
+#   3. Node facts files exist in env_dir (created by vps-deploy-rescue.yml)
+#   4. talosctl, kubectl, helm installed locally
 # =============================================================================
 
 - name: Deploy Talos cluster on VPS

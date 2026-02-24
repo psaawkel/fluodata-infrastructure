@@ -1,0 +1,95 @@
+---
+# =============================================================================
+# Role: vps_detect — Auto-detect VPS network settings from rescue mode
+#
+# Runs on rescue mode hosts. Detects:
+#   - gateway (from default route)
+#   - subnet_mask (32 if point-to-point gateway route, else 24)
+#   - nameservers (from /etc/resolv.conf)
+#   - install_disk (largest disk by byte size)
+#
+# Saves results to env_dir/node-facts-<name>.yml on localhost.
+# These facts are read later by talos_generate for patch generation.
+#
+# Config.yml values override detected values when present.
+# =============================================================================
+
+# --- Detect gateway ---
+- name: Get default gateway
+  ansible.builtin.shell:
+    cmd: ip route show default | awk '/default via/ {print $3}'
+  register: _detected_gateway
+  changed_when: false
+
+- name: Fail if no gateway detected
+  ansible.builtin.fail:
+    msg: "Could not detect default gateway on {{ inventory_hostname }}"
+  when: _detected_gateway.stdout | trim == ''
+
+# --- Detect subnet mask ---
+# Check if gateway has a /32 host route (scope link, no subnet prefix).
+# This indicates point-to-point routing (common on OVH, Hetzner cloud, etc.).
+# Example: "51.83.162.1 dev ens3 scope link" → /32 point-to-point
+# If no host route to gateway exists, assume standard /24 subnet.
+- name: Check for point-to-point gateway route
+  ansible.builtin.shell:
+    cmd: ip route show {{ _detected_gateway.stdout | trim }} | grep -c 'scope link'
+  register: _p2p_route_check
+  changed_when: false
+  failed_when: false
+
+- name: Determine subnet mask
+  ansible.builtin.set_fact:
+    _detected_subnet_mask: "{{ '32' if _p2p_route_check.stdout | trim | int > 0 else '24' }}"
+
+# --- Detect nameservers ---
+- name: Get nameservers from resolv.conf
+  ansible.builtin.shell:
+    cmd: grep '^nameserver' /etc/resolv.conf | awk '{print $2}'
+  register: _detected_nameservers_raw
+  changed_when: false
+
+- name: Set detected nameservers
+  ansible.builtin.set_fact:
+    _detected_nameservers: "{{ _detected_nameservers_raw.stdout_lines }}"
+
+# --- Detect install disk ---
+# Strategy: find the largest disk by byte size. The rescue OS uses a small
+# disk (~3G). The real VPS disk is the larger one (40G, 75G, etc.).
+- name: Get disk sizes in bytes
+  ansible.builtin.shell:
+    cmd: lsblk -dbnro NAME,SIZE,TYPE | awk '$3=="disk" {print $2, $1}'
+  register: _disk_info
+  changed_when: false
+
+- name: Determine install disk (largest disk)
+  ansible.builtin.set_fact:
+    _detected_install_disk: "/dev/{{ _disk_info.stdout_lines | map('split', ' ') | sort(reverse=true) | first | last }}"
+
+# --- Show detected values ---
+- name: Show detected network settings
+  ansible.builtin.debug:
+    msg: |
+      Node:        {{ inventory_hostname }}
+      Host:        {{ hostvars[inventory_hostname]._node_config.host }}
+      IP:          {{ hostvars[inventory_hostname]._node_ip }}
+      Gateway:     {{ _detected_gateway.stdout | trim }}
+      Subnet mask: /{{ _detected_subnet_mask | trim }}
+      Nameservers: {{ _detected_nameservers | join(', ') }}
+      Install disk: {{ _detected_install_disk }}
+
+# --- Save facts to env_dir on localhost ---
+- name: Save node facts to env directory
+  ansible.builtin.copy:
+    content: |
+      # Auto-detected from rescue mode on {{ ansible_date_time.iso8601 | default('unknown') }}
+      gateway: "{{ _detected_gateway.stdout | trim }}"
+      subnet_mask: {{ _detected_subnet_mask | trim }}
+      nameservers:
+      {% for ns in _detected_nameservers %}
+        - "{{ ns }}"
+      {% endfor %}
+      install_disk: "{{ _detected_install_disk }}"
+    dest: "{{ hostvars[inventory_hostname]._env_dir }}/node-facts-{{ inventory_hostname }}.yml"
+    mode: "0600"
+  delegate_to: localhost

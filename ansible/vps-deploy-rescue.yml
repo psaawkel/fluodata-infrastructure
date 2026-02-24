@@ -1,37 +1,42 @@
 ---
 # =============================================================================
-# vps-deploy-rescue.yml — Write Talos image to VPS disk + generate configs
+# vps-deploy-rescue.yml — Detect VPS settings + write Talos image to disk
 #
 # Usage:
 #   cd ansible
-#   ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-ovh-test
+#   ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-ovh-test1
 #
 # Prerequisites:
 #   1. VPS booted into rescue mode (provider dashboard)
-#   2. Rescue mode SSH credentials in config.yml
+#   2. Rescue mode SSH credentials in config.yml (host + rescue_ssh_pass)
+#
+# What this playbook does:
+#   1. Loads config, validates, adds rescue hosts to inventory
+#   2. SSHes into rescue mode, auto-detects network settings (gateway,
+#      subnet_mask, nameservers, install_disk), saves to node-facts-<name>.yml
+#   3. Downloads Talos metal image and writes it to the detected disk
 #
 # After this playbook completes:
 #   1. Switch VPS boot mode back to local/normal (provider dashboard)
 #   2. Reboot the VPS (provider dashboard)
 #   3. Wait ~60s for Talos to boot in maintenance mode
-#   4. Run: ansible-playbook vps-deploy.yml -e env=../environments/vps-ovh-test
+#   4. Run: ansible-playbook vps-deploy.yml -e env=../environments/vps-ovh-test1
 # =============================================================================
 
-# --- Load config, validate, generate Talos configs ---
-- name: Load config and generate Talos configs
+# --- Load config and validate ---
+- name: Load config and validate
   hosts: localhost
   gather_facts: false
   pre_tasks:
     - ansible.builtin.include_tasks: tasks/load-config.yml
     - ansible.builtin.include_tasks: tasks/validate-vps.yml
-  roles:
-    - talos_generate
 
-# --- Install Talos via rescue mode ---
-- name: Install Talos on VPS nodes (rescue mode)
+# --- Detect network settings + install Talos ---
+- name: Detect settings and install Talos on VPS nodes (rescue mode)
   hosts: rescue_mode
-  gather_facts: false
+  gather_facts: true
   roles:
+    - vps_detect
     - talos_install
 
 # --- Done — remind user of next steps ---
@@ -43,10 +48,11 @@
       ansible.builtin.debug:
         msg: |
           ====================================================================
-          Talos image written to disk. Configs generated in {{ env_dir }}.
+          Talos image written to disk on all nodes.
+          Network settings detected and saved to {{ env_dir }}/node-facts-*.yml
 
           NEXT STEPS:
-            1. Switch VPS boot mode from rescue → local/normal
+            1. Switch ALL VPS boot mode from rescue → local/normal
                (OVH: Dashboard → VPS → Boot → Normal boot → Reboot)
             2. Wait ~60 seconds for Talos to boot in maintenance mode
             3. Run the deploy playbook:

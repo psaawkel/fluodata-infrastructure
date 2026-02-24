@@ -1,0 +1,71 @@
+---
+# =============================================================================
+# vps-apply.yml — Generate and apply Talos configs to running VPS nodes
+#
+# Use this playbook to:
+#   - Apply config changes to an existing cluster
+#   - Add new nodes to an existing cluster
+#   - Update machine config settings (e.g., kernel modules, sysctls)
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook vps-apply.yml -e env=../environments/vps-ovh-test1
+#
+# Prerequisites:
+#   1. Cluster already bootstrapped (vps-deploy.yml completed at least once)
+#   2. Node facts files exist in env_dir (from vps-deploy-rescue.yml)
+#   3. talosctl installed locally
+#
+# What this does:
+#   1. Regenerates Talos configs from config.yml + node facts
+#   2. Applies configs to all nodes using authenticated talosctl
+#   3. Does NOT bootstrap etcd, install Cilium, or generate kubeconfig
+# =============================================================================
+
+- name: Apply Talos configs to VPS nodes
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - ansible.builtin.include_tasks: tasks/load-config.yml
+    - ansible.builtin.include_tasks: tasks/validate-vps.yml
+  roles:
+    - talos_generate
+  tasks:
+    # --- Apply configs using talosconfig (authenticated) ---
+    - name: Set talosconfig path
+      ansible.builtin.set_fact:
+        _talosconfig: "{{ env_dir }}/talosconfig"
+
+    - name: Apply config to control plane nodes
+      ansible.builtin.command:
+        cmd: >-
+          talosctl apply-config
+            --talosconfig {{ _talosconfig }}
+            --nodes {{ item.host }}
+            --endpoints {{ item.host }}
+            --config-patch @{{ env_dir }}/patch-{{ item.name }}.yaml
+            --file {{ env_dir }}/controlplane.yaml
+      loop: "{{ controlplane_nodes }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Apply config to worker nodes
+      ansible.builtin.command:
+        cmd: >-
+          talosctl apply-config
+            --talosconfig {{ _talosconfig }}
+            --nodes {{ item.host }}
+            --endpoints {{ item.host }}
+            --config-patch @{{ env_dir }}/patch-{{ item.name }}.yaml
+            --file {{ env_dir }}/worker.yaml
+      loop: "{{ worker_nodes | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: (worker_nodes | default([])) | length > 0
+
+    - name: Show apply result
+      ansible.builtin.debug:
+        msg: |
+          Config applied to all nodes.
+          If you changed settings that require a reboot (e.g., kernel modules),
+          nodes will reboot automatically.

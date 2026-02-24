@@ -23,8 +23,8 @@
         cmd: >-
           talosctl reset
             --talosconfig {{ env_dir }}/talosconfig
-            --nodes {{ item.ip }}
-            --endpoints {{ item.ip }}
+            --nodes {{ item.host }}
+            --endpoints {{ item.host }}
             --graceful=false
             --reboot
       loop: "{{ all_nodes }}"

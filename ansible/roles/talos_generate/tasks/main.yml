@@ -8,10 +8,15 @@
 #
 # Required variables:
 #   - env_dir, cluster_name, cluster_endpoint, talos_version
-#   - talos_schematic_id, talos_install_image, talos_install_disk
+#   - talos_schematic_id, talos_install_image
 #   - controlplane_nodes, worker_nodes, all_nodes
-#   - vm_gateway, vm_subnet_mask, vm_nameservers
 #   - cilium_version
+#
+# Per-node network settings resolved from (in priority order):
+#   1. Config.yml per-node values (e.g., node.gateway)
+#   2. Auto-detected facts from node-facts-<name>.yml (created by vps_detect)
+#   3. Global config.yml values (vm_gateway, vm_subnet_mask, etc.) — Proxmox compat
+#
 # Optional: cluster_vip, etcd_advertised_subnets, allow_scheduling_on_controlplanes
 # =============================================================================
 
@@ -54,13 +59,11 @@
     mode: "0600"
 
 - name: Generate per-node patches
-  ansible.builtin.template:
-    src: patch-node.yaml.j2
-    dest: "{{ env_dir }}/patch-{{ item.name }}.yaml"
-    mode: "0600"
+  ansible.builtin.include_tasks: generate-node-patch.yml
   loop: "{{ all_nodes }}"
   loop_control:
-    label: "{{ item.name }}"
+    loop_var: _node
+    label: "{{ _node.name }}"
 
 # =============================================================================
 # Generate Talos configs from secrets + patches
@@ -103,10 +106,10 @@
   ansible.builtin.command:
     cmd: >-
       talosctl --talosconfig {{ env_dir }}/talosconfig
-        config endpoint {{ cluster_vip | default(controlplane_nodes[0].ip) }}
+        config endpoint {{ cluster_vip | default(controlplane_nodes[0].host) }}
 
 - name: Set talosconfig default nodes
   ansible.builtin.command:
     cmd: >-
       talosctl --talosconfig {{ env_dir }}/talosconfig
-        config nodes {{ controlplane_nodes | map(attribute='ip') | join(' ') }}
+        config nodes {{ controlplane_nodes | map(attribute='host') | join(' ') }}

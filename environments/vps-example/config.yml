@@ -10,14 +10,14 @@
 #   cd ansible
 #   1. Boot VPS into rescue mode (provider dashboard)
 #   2. ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-prod
+#      (auto-detects network settings + writes Talos to disk)
 #   3. Switch VPS boot mode back to normal (provider dashboard)
 #   4. Reboot VPS (provider dashboard)
 #   5. Wait ~60s for Talos maintenance mode
 #   6. ansible-playbook vps-deploy.yml -e env=../environments/vps-prod
 #
-# Deploy (re-deploy — Talos already on disk, just re-bootstrap):
-#   cd ansible
-#   ansible-playbook vps-deploy.yml -e env=../environments/vps-prod
+# Apply config changes to running cluster:
+#   ansible-playbook vps-apply.yml -e env=../environments/vps-prod
 #
 # Destroy:
 #   ansible-playbook vps-destroy.yml -e env=../environments/vps-prod
@@ -31,39 +31,41 @@ platform: vps
 talos_version: v1.12.4
 # Schematic ID from factory.talos.dev (includes extensions: iscsi-tools, util-linux-tools)
 talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
-talos_install_disk: /dev/sda
 
 # --- Cluster ---
 cluster_name: fluodata
 # No VIP on VPS — no shared L2 for gratuitous ARP.
 # cluster_vip is intentionally NOT set. API endpoint uses first CP node IP.
 
-# --- Network ---
-# Public network — each node has a public IP assigned by the VPS provider.
-# Gateway is the provider-assigned gateway for your IP block.
-vm_gateway: REPLACE_WITH_GATEWAY
-vm_subnet_mask: 32
-vm_nameservers:
-  - 213.186.33.99
-  - 1.1.1.1
-
 # --- Nodes ---
-# All 3 nodes are combined controlplane + worker.
-# Each needs: name, ip (public IP)
-# For rescue mode install, also: rescue_ssh_host, rescue_ssh_user, rescue_ssh_pass
-# rescue_ssh_pass is needed when rescue mode uses password auth (e.g., OVH)
+# Network settings (gateway, subnet_mask, nameservers, install_disk) are
+# auto-detected from rescue mode by vps-deploy-rescue.yml.
+# No need to specify them here unless you want to override the detected values.
+#
+# Required per-node:
+#   host: hostname or IPv4 address to connect to (SSH, talosctl)
+#   ip:   (optional if host is an IPv4) static IPv4 for Talos machine config.
+#         If omitted and host is an IPv4 address, ip defaults to host.
+#         If host is a hostname, ip must be set explicitly.
+#
+# Per-node overrides (optional):
+#   gateway: override detected gateway
+#   subnet_mask: override detected subnet mask (24 or 32)
+#   nameservers: override detected nameservers
+#   install_disk: override detected install disk
+#
+# Rescue mode credentials:
+#   rescue_ssh_pass: password for rescue mode SSH (OVH provides this)
+#   rescue_ssh_user: SSH user (default: root)
 controlplane_nodes:
-  - name: node-0
-    ip: REPLACE_WITH_VPS_0_PUBLIC_IP
-    rescue_ssh_host: REPLACE_WITH_VPS_0_PUBLIC_IP
+  - name: cp-0
+    host: REPLACE_WITH_VPS_0_HOSTNAME_OR_IP
     rescue_ssh_pass: REPLACE_OR_REMOVE
-  - name: node-1
-    ip: REPLACE_WITH_VPS_1_PUBLIC_IP
-    rescue_ssh_host: REPLACE_WITH_VPS_1_PUBLIC_IP
+  - name: cp-1
+    host: REPLACE_WITH_VPS_1_HOSTNAME_OR_IP
     rescue_ssh_pass: REPLACE_OR_REMOVE
-  - name: node-2
-    ip: REPLACE_WITH_VPS_2_PUBLIC_IP
-    rescue_ssh_host: REPLACE_WITH_VPS_2_PUBLIC_IP
+  - name: cp-2
+    host: REPLACE_WITH_VPS_2_HOSTNAME_OR_IP
     rescue_ssh_pass: REPLACE_OR_REMOVE
 
 # No dedicated workers — all nodes are combined CP+worker

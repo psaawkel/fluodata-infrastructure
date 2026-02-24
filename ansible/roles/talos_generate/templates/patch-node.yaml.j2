@@ -1,27 +1,28 @@
 # Per-node patch: static IP, routes, nameservers, VIP (CP only), install image
-# NO hostname — let DHCP or Talos auto-generate handle it
+# Network settings loaded from node-facts-<name>.yml (auto-detected from rescue mode)
+# Config.yml node values override detected values
 machine:
   network:
     interfaces:
       - deviceSelector:
           physical: true
         addresses:
-          - {{ item.ip }}/{{ vm_subnet_mask }}
+          - {{ item.ip }}/{{ _node_subnet_mask }}
 {% if item.name in controlplane_nodes | map(attribute='name') | list and cluster_vip is defined %}
         vip:
           ip: {{ cluster_vip }}
 {% endif %}
         routes:
-{% if vm_subnet_mask | int == 32 %}
+{% if _node_subnet_mask | int == 32 %}
           # /32 point-to-point: direct route to gateway via interface, then default
-          - network: {{ vm_gateway }}/32
+          - network: {{ _node_gateway }}/32
 {% endif %}
           - network: 0.0.0.0/0
-            gateway: {{ vm_gateway }}
+            gateway: {{ _node_gateway }}
     nameservers:
-{% for ns in vm_nameservers %}
+{% for ns in _node_nameservers %}
       - {{ ns }}
 {% endfor %}
   install:
-    disk: {{ talos_install_disk | default('/dev/sda') }}
+    disk: {{ _node_install_disk }}
     image: {{ talos_install_image }}

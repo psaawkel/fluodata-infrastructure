@@ -6,15 +6,25 @@
 # Downloads Talos metal image and writes it directly to disk with dd.
 # After reboot, VPS boots Talos from disk in maintenance mode.
 #
+# Install disk is auto-detected by vps_detect role (saved in node facts).
+# Config.yml can override with per-node install_disk.
+#
 # This role targets the VPS nodes themselves (via rescue mode SSH).
 # =============================================================================
 
-- name: Check if Talos is already installed
-  ansible.builtin.command:
-    cmd: lsblk -no FSTYPE {{ talos_install_disk | default('/dev/sda') }}1
-  register: disk_check
-  changed_when: false
-  failed_when: false
+- name: Load node facts
+  ansible.builtin.include_vars:
+    file: "{{ hostvars[inventory_hostname]._env_dir }}/node-facts-{{ inventory_hostname }}.yml"
+    name: _node_facts
+  delegate_to: localhost
+
+- name: Resolve install disk (config override > detected)
+  ansible.builtin.set_fact:
+    _install_disk: "{{ hostvars[inventory_hostname]._node_config.install_disk | default(_node_facts.install_disk) }}"
+
+- name: Show install target
+  ansible.builtin.debug:
+    msg: "Installing Talos to {{ _install_disk }} on {{ inventory_hostname }} ({{ hostvars[inventory_hostname]._node_config.host }})"
 
 - name: Download Talos metal image
   ansible.builtin.get_url:
@@ -22,12 +32,10 @@
     dest: /tmp/talos-metal.raw.xz
     mode: "0644"
     timeout: 300
-  when: "'TALOS' not in disk_check.stdout | default('')"
 
 - name: Write Talos image to disk
   ansible.builtin.shell:
-    cmd: xz -d --stdout /tmp/talos-metal.raw.xz | dd of={{ talos_install_disk | default('/dev/sda') }} bs=4M status=progress conv=fsync
-  when: "'TALOS' not in disk_check.stdout | default('')"
+    cmd: xz -d --stdout /tmp/talos-metal.raw.xz | dd of={{ _install_disk }} bs=4M status=progress conv=fsync
 
 - name: Clean up downloaded image
   ansible.builtin.file:
