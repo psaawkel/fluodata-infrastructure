@@ -146,14 +146,6 @@ spec:
         app.kubernetes.io/instance: kubelet-serving-cert-approver
         app.kubernetes.io/name: kubelet-serving-cert-approver
     spec:
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - preference:
-              matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: DoesNotExist
-            weight: 100
       containers:
       - args:
         - serve
