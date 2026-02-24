@@ -58,20 +58,25 @@ talos_iso_storage: local
 # dhcp_lease_time: 12h
 
 # --- Nodes ---
-# Each node needs: name, vmid, host, mac, cores, memory, boot_disk_gb
+# Each node has a role:
+#   cp       — control plane only (NoSchedule taint, no workloads)
+#   worker   — worker only (no etcd, no control plane components)
+#   cpworker — combined control plane + worker (schedules workloads)
+#
+# Required per-node: name, role, host, vmid, mac, cores, memory, boot_disk_gb
 # host: IPv4 address for the VM (used for DHCP reservation + Talos static IP)
 # Workers can additionally have: longhorn_disk_gb
-controlplane_nodes:
+nodes:
   - name: cp-0
+    role: cp
     vmid: 110
     host: 10.10.0.10
     mac: "BC:24:11:01:01:01"
     cores: 2
     memory: 4096
     boot_disk_gb: 20
-
-worker_nodes:
   - name: worker-0
+    role: worker
     vmid: 120
     host: 10.10.0.20
     mac: "BC:24:11:02:01:01"
@@ -80,6 +85,7 @@ worker_nodes:
     boot_disk_gb: 20
     longhorn_disk_gb: 20
   - name: worker-1
+    role: worker
     vmid: 121
     host: 10.10.0.21
     mac: "BC:24:11:02:01:02"

@@ -18,9 +18,6 @@ cluster:
       - {{ subnet }}
 {% endfor %}
 {% endif %}
-{% if allow_scheduling_on_controlplanes | default(false) %}
-  allowSchedulingOnControlPlanes: true
-{% endif %}
 machine:
   kernel:
     modules:

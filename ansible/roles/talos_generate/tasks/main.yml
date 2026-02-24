@@ -17,7 +17,7 @@
 #   2. Auto-detected facts from node-facts-<name>.yml (created by vps_detect)
 #   3. Global config.yml values (vm_gateway, vm_subnet_mask, etc.) — Proxmox compat
 #
-# Optional: cluster_vip, etcd_advertised_subnets, allow_scheduling_on_controlplanes
+# Optional: cluster_vip, etcd_advertised_subnets
 # =============================================================================
 
 # --- Create env directory ---

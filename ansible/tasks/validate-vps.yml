@@ -11,6 +11,11 @@
 # Node `ip` field: (optional) static IPv4 for Talos config.
 #   - If host is an IPv4 and ip is not set, ip defaults to host.
 #   - If host is a hostname, ip must be set explicitly.
+#
+# Node `role` field: cp | worker | cpworker
+#   - cp: control plane only (NoSchedule taint)
+#   - worker: worker only
+#   - cpworker: combined control plane + worker (schedules workloads)
 
 - name: Validate platform is vps
   ansible.builtin.fail:
@@ -24,58 +29,59 @@
     - cluster_name
     - talos_version
     - talos_schematic_id
-    - controlplane_nodes
+    - nodes
   when: lookup('vars', item, default='__MISSING__') == '__MISSING__'
+
+- name: Validate node roles
+  ansible.builtin.fail:
+    msg: "Node {{ item.name }}: invalid role '{{ item.role | default('undefined') }}'. Must be cp, worker, or cpworker."
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.role | default('') not in ['cp', 'worker', 'cpworker']
+
+- name: Validate at least one control plane node
+  ansible.builtin.fail:
+    msg: "No control plane nodes defined. At least one node must have role 'cp' or 'cpworker'."
+  when: nodes | selectattr('role', 'in', ['cp', 'cpworker']) | list | length == 0
 
 # Resolve ip for each node: if host is an IPv4, ip defaults to host.
 # If host is a hostname, ip must be explicitly set in config.yml.
-- name: Build enriched controlplane nodes
+- name: Build enriched nodes list
   ansible.builtin.set_fact:
-    _enriched_cp_nodes: "{{ _enriched_cp_nodes | default([]) + [_enriched_node] }}"
+    _enriched_nodes: "{{ _enriched_nodes | default([]) + [_enriched_node] }}"
   vars:
     _host_is_ipv4: "{{ item.host | default('') | regex_search('^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$') is not none }}"
     _resolved_ip: "{{ item.ip | default(item.host if (_host_is_ipv4 | bool) else '') }}"
     _enriched_node: "{{ item | combine({'ip': _resolved_ip}) }}"
-  loop: "{{ controlplane_nodes }}"
+  loop: "{{ nodes }}"
   loop_control:
     label: "{{ item.name }}"
-
-- name: Build enriched worker nodes
-  ansible.builtin.set_fact:
-    _enriched_worker_nodes: "{{ _enriched_worker_nodes | default([]) + [_enriched_node] }}"
-  vars:
-    _host_is_ipv4: "{{ item.host | default('') | regex_search('^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$') is not none }}"
-    _resolved_ip: "{{ item.ip | default(item.host if (_host_is_ipv4 | bool) else '') }}"
-    _enriched_node: "{{ item | combine({'ip': _resolved_ip}) }}"
-  loop: "{{ worker_nodes | default([]) }}"
-  loop_control:
-    label: "{{ item.name }}"
-  when: (worker_nodes | default([])) | length > 0
 
 - name: Validate all nodes have resolved IPs
   ansible.builtin.fail:
     msg: >-
       Node {{ item.name }}: host '{{ item.host }}' is not an IPv4 address and no explicit 'ip' is set.
       When using a hostname for 'host', you must also set 'ip' with the node's static IPv4 address.
-  loop: "{{ _enriched_cp_nodes + (_enriched_worker_nodes | default([])) }}"
+  loop: "{{ _enriched_nodes }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.ip | default('') == ''
 
+# Derive role-based lists from enriched nodes
 - name: Set computed variables
   ansible.builtin.set_fact:
     env_dir: "{{ env_dir }}"
     cluster_name: "{{ cluster_name }}"
-    cluster_endpoint: "{{ 'https://' ~ _enriched_cp_nodes[0].ip ~ ':6443' }}"
     talos_version: "{{ talos_version }}"
     talos_schematic_id: "{{ talos_schematic_id }}"
     talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
     talos_metal_image_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/metal-amd64.raw.xz"
-    controlplane_nodes: "{{ _enriched_cp_nodes }}"
-    worker_nodes: "{{ _enriched_worker_nodes | default([]) }}"
-    all_nodes: "{{ _enriched_cp_nodes + (_enriched_worker_nodes | default([])) }}"
+    all_nodes: "{{ _enriched_nodes }}"
+    controlplane_nodes: "{{ _enriched_nodes | selectattr('role', 'in', ['cp', 'cpworker']) | list }}"
+    worker_nodes: "{{ _enriched_nodes | selectattr('role', 'equalto', 'worker') | list }}"
+    cluster_endpoint: "{{ 'https://' ~ (_enriched_nodes | selectattr('role', 'in', ['cp', 'cpworker']) | first).ip ~ ':6443' }}"
     cilium_version: "{{ cilium_version | default('1.17.3') }}"
-    allow_scheduling_on_controlplanes: "{{ allow_scheduling_on_controlplanes | default((worker_nodes | default([])) | length == 0) }}"
 
 - name: Add rescue mode hosts to inventory
   ansible.builtin.add_host:
@@ -105,4 +111,4 @@
       Endpoint:    {{ cluster_endpoint }}
       Env folder:  {{ env_dir }}
       CP nodes:    {{ controlplane_nodes | map(attribute='name') | join(', ') }}
-      Workers:     {{ (worker_nodes | default([])) | map(attribute='name') | join(', ') | default('(none)') }}
+      Workers:     {{ worker_nodes | map(attribute='name') | join(', ') | default('(none)') }}

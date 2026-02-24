@@ -5,6 +5,11 @@
 #
 # Node `host` field: IPv4 address for the VM (used for DHCP reservation + Talos static IP).
 # The `ip` field is auto-derived from `host` for downstream compatibility.
+#
+# Node `role` field: cp | worker | cpworker
+#   - cp: control plane only (NoSchedule taint)
+#   - worker: worker only
+#   - cpworker: combined control plane + worker (schedules workloads)
 
 - name: Validate platform is proxmox
   ansible.builtin.fail:
@@ -25,32 +30,36 @@
     - cluster_name
     - talos_version
     - talos_schematic_id
-    - controlplane_nodes
+    - nodes
     - vm_gateway
   when: lookup('vars', item, default='__MISSING__') == '__MISSING__'
 
-# Enrich nodes: derive ip from host (for Proxmox, host is always an IPv4)
-- name: Build enriched controlplane nodes
-  ansible.builtin.set_fact:
-    _enriched_cp_nodes: "{{ _enriched_cp_nodes | default([]) + [item | combine({'ip': item.ip | default(item.host)})] }}"
-  loop: "{{ controlplane_nodes }}"
+- name: Validate node roles
+  ansible.builtin.fail:
+    msg: "Node {{ item.name }}: invalid role '{{ item.role | default('undefined') }}'. Must be cp, worker, or cpworker."
+  loop: "{{ nodes }}"
   loop_control:
     label: "{{ item.name }}"
+  when: item.role | default('') not in ['cp', 'worker', 'cpworker']
 
-- name: Build enriched worker nodes
+- name: Validate at least one control plane node
+  ansible.builtin.fail:
+    msg: "No control plane nodes defined. At least one node must have role 'cp' or 'cpworker'."
+  when: nodes | selectattr('role', 'in', ['cp', 'cpworker']) | list | length == 0
+
+# Enrich nodes: derive ip from host (for Proxmox, host is always an IPv4)
+- name: Build enriched nodes list
   ansible.builtin.set_fact:
-    _enriched_worker_nodes: "{{ _enriched_worker_nodes | default([]) + [item | combine({'ip': item.ip | default(item.host)})] }}"
-  loop: "{{ worker_nodes | default([]) }}"
+    _enriched_nodes: "{{ _enriched_nodes | default([]) + [item | combine({'ip': item.ip | default(item.host)})] }}"
+  loop: "{{ nodes }}"
   loop_control:
     label: "{{ item.name }}"
-  when: (worker_nodes | default([])) | length > 0
 
 - name: Set computed variables
   ansible.builtin.set_fact:
     env_dir: "{{ env_dir }}"
     cluster_name: "{{ cluster_name }}"
     cluster_vip: "{{ cluster_vip | default(omit) }}"
-    cluster_endpoint: "{{ 'https://' ~ (cluster_vip | default(_enriched_cp_nodes[0].ip)) ~ ':6443' }}"
     talos_version: "{{ talos_version }}"
     talos_schematic_id: "{{ talos_schematic_id }}"
     talos_iso_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/nocloud-amd64.iso"
@@ -58,9 +67,10 @@
     talos_iso_storage: "{{ talos_iso_storage | default('local') }}"
     talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
     talos_install_disk: "{{ talos_install_disk | default('/dev/sda') }}"
-    controlplane_nodes: "{{ _enriched_cp_nodes }}"
-    worker_nodes: "{{ _enriched_worker_nodes | default([]) }}"
-    all_nodes: "{{ _enriched_cp_nodes + (_enriched_worker_nodes | default([])) }}"
+    all_nodes: "{{ _enriched_nodes }}"
+    controlplane_nodes: "{{ _enriched_nodes | selectattr('role', 'in', ['cp', 'cpworker']) | list }}"
+    worker_nodes: "{{ _enriched_nodes | selectattr('role', 'equalto', 'worker') | list }}"
+    cluster_endpoint: "{{ 'https://' ~ (cluster_vip | default((_enriched_nodes | selectattr('role', 'in', ['cp', 'cpworker']) | first).ip)) ~ ':6443' }}"
     vm_bridge: "{{ vm_bridge | default('vmbr1') }}"
     vm_gateway: "{{ vm_gateway }}"
     vm_subnet_mask: "{{ vm_subnet_mask | default(24) }}"
@@ -119,4 +129,4 @@
       Endpoint:    {{ cluster_endpoint }}
       Env folder:  {{ env_dir }}
       CP nodes:    {{ controlplane_nodes | map(attribute='name') | join(', ') }}
-      Workers:     {{ (worker_nodes | default([])) | map(attribute='name') | join(', ') | default('(none)') }}
+      Workers:     {{ worker_nodes | map(attribute='name') | join(', ') | default('(none)') }}

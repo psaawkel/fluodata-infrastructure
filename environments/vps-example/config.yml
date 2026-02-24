@@ -38,38 +38,39 @@ cluster_name: fluodata
 # cluster_vip is intentionally NOT set. API endpoint uses first CP node IP.
 
 # --- Nodes ---
-# Network settings (gateway, subnet_mask, nameservers, install_disk) are
-# auto-detected from rescue mode by vps-deploy-rescue.yml.
-# No need to specify them here unless you want to override the detected values.
+# Each node has a role:
+#   cp       — control plane only (NoSchedule taint, no workloads)
+#   worker   — worker only (no etcd, no control plane components)
+#   cpworker — combined control plane + worker (schedules workloads)
 #
 # Required per-node:
+#   name: unique node name
+#   role: cp | worker | cpworker
 #   host: hostname or IPv4 address to connect to (SSH, talosctl)
-#   ip:   (optional if host is an IPv4) static IPv4 for Talos machine config.
-#         If omitted and host is an IPv4 address, ip defaults to host.
-#         If host is a hostname, ip must be set explicitly.
 #
-# Per-node overrides (optional):
-#   gateway: override detected gateway
-#   subnet_mask: override detected subnet mask (24 or 32)
-#   nameservers: override detected nameservers
+# Optional per-node:
+#   ip:           static IPv4 for Talos machine config (defaults to host if host is IPv4)
+#   gateway:      override detected gateway
+#   subnet_mask:  override detected subnet mask (24 or 32)
+#   nameservers:  override detected nameservers
 #   install_disk: override detected install disk
 #
-# Rescue mode credentials:
+# Rescue mode credentials (for vps-deploy-rescue.yml):
 #   rescue_ssh_pass: password for rescue mode SSH (OVH provides this)
 #   rescue_ssh_user: SSH user (default: root)
-controlplane_nodes:
+nodes:
   - name: cp-0
+    role: cpworker
     host: REPLACE_WITH_VPS_0_HOSTNAME_OR_IP
     rescue_ssh_pass: REPLACE_OR_REMOVE
   - name: cp-1
+    role: cpworker
     host: REPLACE_WITH_VPS_1_HOSTNAME_OR_IP
     rescue_ssh_pass: REPLACE_OR_REMOVE
   - name: cp-2
+    role: cpworker
     host: REPLACE_WITH_VPS_2_HOSTNAME_OR_IP
     rescue_ssh_pass: REPLACE_OR_REMOVE
-
-# No dedicated workers — all nodes are combined CP+worker
-worker_nodes: []
 
 # --- Cilium ---
 cilium_version: "1.17.3"
