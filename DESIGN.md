@@ -1,7 +1,7 @@
 # FluoData Infrastructure — Unified Multi-Platform Design
 
-**Version:** 3.1 (Ansible-based, multi-platform, env-folder pattern)  
-**Status:** Proxmox working (pre-refactor test pending), VPS in progress (rescue install tested)  
+**Version:** 4.0 (Ansible-based, multi-platform, refactored role architecture)  
+**Status:** VPS tested end-to-end (OVH VPS), Proxmox tested (pre-refactor, re-test pending)  
 **Date:** 2026-02-24
 
 ---
@@ -47,6 +47,7 @@ environments/proxmox-homelab/
 | **Merged plays by host** | Plays targeting the same host are merged into a single play with multiple roles. No unnecessary play boundaries. |
 | **VPS not OVH** | Platform is `vps`, not `ovh` — not tied to a specific provider. Works with any VPS that supports rescue mode boot. |
 | **Cilium via Helm** | Post-bootstrap `helm install` is simpler than embedding 1600+ lines of YAML in Talos config. |
+| **kubelet-serving-cert-approver** | Kubelet serving cert CSRs (`kubernetes.io/kubelet-serving`) are NOT auto-approved by Kubernetes. Without this controller, kubelet port 10250 gets TLS errors. |
 | **No `machine.network.hostname`** | dnsmasq handles it (Proxmox) or Talos auto-generates (VPS). |
 | **`deviceSelector: { physical: true }`** | Works across QEMU and bare metal. |
 
@@ -68,11 +69,15 @@ fluodata-infrastructure/
 │   │   ├── validate-proxmox.yml    # Proxmox: check fields, set vars, add_host
 │   │   └── validate-vps.yml        # VPS: check fields, set vars, add rescue hosts
 │   └── roles/
-│       ├── proxmox_vms/            # Proxmox-only: create/start VMs
-│       ├── proxmox_post_install/   # Proxmox-only: boot order fix
-│       ├── talos_install/          # VPS-only: dd image in rescue mode
-│       ├── talos_bootstrap/        # COMMON: secrets, configs, apply, bootstrap
-│       └── cilium/                 # COMMON: helm install Cilium
+│       ├── talos_generate/        # COMMON: generate secrets, patches, machine configs
+│       ├── talos_bootstrap_proxmox/ # Proxmox: copy configs, apply, bootstrap, kubeconfig
+│       ├── talos_bootstrap_vps/   # VPS: apply configs, bootstrap, kubeconfig
+│       ├── talos_install/         # VPS-only: dd image in rescue mode
+│       ├── proxmox_vms/           # Proxmox-only: create/start VMs
+│       ├── proxmox_dnsmasq/       # Proxmox-only: dnsmasq DHCP config
+│       ├── proxmox_post_install/  # Proxmox-only: boot order fix
+│       ├── cilium/                # COMMON: helm install Cilium
+│       └── kubelet_cert_approver/ # COMMON: auto-approve kubelet serving cert CSRs
 │
 ├── environments/
 │   ├── proxmox-example/            # Committed — copy for new Proxmox env
@@ -151,13 +156,16 @@ proxmox-deploy.yml -e env=../environments/proxmox-homelab
     │
     ├── Play 1: localhost
     │   ├── load-config.yml → resolve path, load config.yml
-    │   └── validate-proxmox.yml → check fields, set vars, add Proxmox host
+    │   ├── validate-proxmox.yml → check fields, set vars, add Proxmox host
+    │   └── talos_generate → secrets, patches, machine configs → env_dir
     │
-    └── Play 2: proxmox_hosts (single play, 4 roles)
-        ├── proxmox_vms        → Download ISO, create VMs, start VMs
-        ├── talos_bootstrap    → Secrets → patches → configs → apply → bootstrap → kubeconfig
-        ├── proxmox_post_install → Switch boot order to disk, detach ISO
-        └── cilium             → Install Cilium, wait for nodes Ready
+    └── Play 2: proxmox_hosts (single play, 5 roles)
+        ├── proxmox_dnsmasq         → Configure DHCP reservations
+        ├── proxmox_vms             → Download ISO, create VMs, start VMs
+        ├── talos_bootstrap_proxmox → Copy configs, apply, bootstrap, kubeconfig
+        ├── proxmox_post_install    → Switch boot order to disk, detach ISO
+        ├── cilium                  → Install Cilium, wait for nodes Ready
+        └── kubelet_cert_approver   → Deploy kubelet serving cert auto-approver
 ```
 
 ### VPS Flow
@@ -173,7 +181,8 @@ vps-deploy-rescue.yml -e env=../environments/vps-prod
     │
     ├── Play 1: localhost
     │   ├── load-config.yml → resolve path, load config.yml
-    │   └── validate-vps.yml → check fields, set vars, add rescue hosts
+    │   ├── validate-vps.yml → check fields, set vars, add rescue hosts
+    │   └── talos_generate → secrets, patches, machine configs → env_dir
     │
     ├── Play 2: rescue_mode
     │   └── talos_install    → dd Talos image to disk
@@ -187,11 +196,13 @@ STEP 2: Bootstrap cluster
 
 vps-deploy.yml -e env=../environments/vps-prod
     │
-    └── Play 1: localhost (pre_tasks + 2 roles)
+    └── Play 1: localhost (pre_tasks + 4 roles)
         ├── load-config.yml → resolve path, load config.yml
         ├── validate-vps.yml → check fields, set vars
-        ├── talos_bootstrap  → Wait for Talos API → secrets → patches → configs → apply → bootstrap → kubeconfig
-        └── cilium           → Install Cilium, wait for nodes Ready
+        ├── talos_generate        → Secrets, patches, machine configs (idempotent)
+        ├── talos_bootstrap_vps   → Wait for Talos API → apply → bootstrap → kubeconfig
+        ├── cilium                → Install Cilium, wait for nodes Ready
+        └── kubelet_cert_approver → Deploy kubelet serving cert auto-approver
 ```
 
 ---
@@ -220,6 +231,10 @@ vps-deploy.yml -e env=../environments/vps-prod
 6. **talosconfig empty endpoints** — must run `talosctl config endpoint` after gen
 7. **VPS rescue mode** — only viable install path (custom ISO not supported)
 8. **Rescue mode reboot** — rebooting while in rescue mode re-enters rescue (provider sets boot mode). Must switch boot mode to normal/local before reboot. Split into separate `vps-deploy-rescue.yml` and `vps-deploy.yml` playbooks to allow manual reboot step.
+9. **Kubelet serving cert CSRs** — `rotate-server-certificates: true` causes kubelet to request serving certs via CSR, but Kubernetes only auto-approves client CSRs. Deploy `kubelet-serving-cert-approver` controller to auto-approve them. Image tag has no `v` prefix (e.g., `0.10.3` not `v0.10.3`).
+10. **Apply-config idempotency** — `talosctl apply-config --insecure` only works in maintenance mode. Configured nodes require `--talosconfig` auth. Bootstrap roles auto-detect mode and use appropriate method.
+11. **OVH /32 point-to-point routing** — IP is /32, gateway is on different subnet. Requires direct route to gateway before default route. Handled conditionally in node patch template.
+12. **OVH rescue mode auth** — Password-based SSH, not key-based. `rescue_ssh_pass` per-node in config.yml.
 
 ---
 
