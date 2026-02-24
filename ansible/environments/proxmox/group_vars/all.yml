@@ -1,0 +1,75 @@
+# =============================================================================
+# Proxmox environment variables
+# =============================================================================
+
+# --- Proxmox connection ---
+proxmox_host: 192.168.122.70
+proxmox_node: pve
+proxmox_api_user: root@pam
+proxmox_api_token_id: terraform
+proxmox_api_token_secret: b5cdc654-9794-4cf2-9011-1590f1c15de3
+
+# --- Talos ---
+talos_version: v1.12.4
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
+talos_iso_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/nocloud-amd64.iso"
+talos_iso_filename: "talos-{{ talos_version }}.iso"
+talos_iso_storage: local
+talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
+talos_install_disk: /dev/sda
+
+# --- Cluster ---
+cluster_name: fluodata
+cluster_vip: 10.10.0.5
+cluster_endpoint: "https://{{ cluster_vip }}:6443"
+
+# --- Directories ---
+# talosctl runs on Proxmox host (VMs on internal vmbr1, unreachable from laptop)
+# talosctl_delegate_to is NOT defined — commands run on inventory host (proxmox)
+talos_work_dir: /tmp/talos-deploy
+talos_local_dir: "{{ playbook_dir }}/../../talos"
+
+# --- Network ---
+vm_bridge: vmbr1
+vm_gateway: 10.10.0.1
+vm_subnet_mask: 24
+vm_nameservers:
+  - 10.10.0.1
+  - 1.1.1.1
+
+# --- VM storage ---
+vm_storage: local-lvm
+
+# --- Node definitions ---
+controlplane_nodes:
+  - name: cp-0
+    vmid: 110
+    ip: 10.10.0.10
+    mac: "BC:24:11:01:01:01"
+    cores: 2
+    memory: 4096
+    boot_disk_gb: 20
+
+worker_nodes:
+  - name: worker-0
+    vmid: 120
+    ip: 10.10.0.20
+    mac: "BC:24:11:02:01:01"
+    cores: 4
+    memory: 8192
+    boot_disk_gb: 20
+    longhorn_disk_gb: 20
+  - name: worker-1
+    vmid: 121
+    ip: 10.10.0.21
+    mac: "BC:24:11:02:01:02"
+    cores: 4
+    memory: 8192
+    boot_disk_gb: 20
+    longhorn_disk_gb: 20
+
+# Merged list for convenience
+all_nodes: "{{ controlplane_nodes + worker_nodes }}"
+
+# --- Cilium ---
+cilium_version: "1.17.3"

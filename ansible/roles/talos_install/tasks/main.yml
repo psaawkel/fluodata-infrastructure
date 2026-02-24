@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# Role: talos_install — Write Talos disk image to OVH VPS nodes
+#
+# Assumes VPS nodes are booted into OVH rescue mode (Debian-based).
+# Downloads Talos metal image and writes it directly to disk with dd.
+# After reboot, VPS boots Talos from disk in maintenance mode.
+#
+# This role targets the VPS nodes themselves (via rescue mode SSH).
+# =============================================================================
+
+- name: Check if Talos is already installed
+  ansible.builtin.command:
+    cmd: lsblk -no FSTYPE {{ talos_install_disk | default('/dev/sda') }}1
+  register: disk_check
+  changed_when: false
+  failed_when: false
+
+- name: Download Talos metal image
+  ansible.builtin.get_url:
+    url: "{{ talos_metal_image_url }}"
+    dest: /tmp/talos-metal.raw.xz
+    mode: "0644"
+    timeout: 300
+  when: "'TALOS' not in disk_check.stdout | default('')"
+
+- name: Write Talos image to disk
+  ansible.builtin.shell:
+    cmd: xz -d --stdout /tmp/talos-metal.raw.xz | dd of={{ talos_install_disk | default('/dev/sda') }} bs=4M status=progress conv=fsync
+  when: "'TALOS' not in disk_check.stdout | default('')"
+
+- name: Clean up downloaded image
+  ansible.builtin.file:
+    path: /tmp/talos-metal.raw.xz
+    state: absent
+
+- name: Reboot into Talos
+  ansible.builtin.reboot:
+    msg: "Rebooting into Talos"
+    reboot_timeout: 0
+  ignore_errors: true
+  # VPS will reboot and SSH (rescue mode) will be gone.
+  # Talos API on port 50000 will be the next contact point.
+  when: "'TALOS' not in disk_check.stdout | default('')"

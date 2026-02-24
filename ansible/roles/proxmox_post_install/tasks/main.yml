@@ -1,0 +1,17 @@
+---
+# =============================================================================
+# Role: proxmox_post_install — Switch boot order to disk, detach ISO
+#
+# After Talos installs to disk, the ISO must not be first in boot order.
+# If the host suspends/resumes and VMs reboot, they'd boot from ISO and halt.
+# =============================================================================
+
+- name: Switch boot order to disk-first and detach ISO
+  ansible.builtin.command:
+    cmd: >-
+      qm set {{ item.vmid }}
+        --boot order=scsi0
+        --ide2 none,media=cdrom
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"

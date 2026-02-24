@@ -1,21 +1,29 @@
-# FluoData Infrastructure - Talos on Proxmox IaC Design
+# FluoData Infrastructure - Unified Multi-Platform Design
 
-**Version:** 2.0 (Ansible-based)  
-**Status:** Implemented and working  
-**Date:** 2026-02-22
+**Version:** 3.0 (Ansible-based, multi-platform)  
+**Status:** Proxmox working, OVH planned  
+**Date:** 2026-02-24
 
 ---
 
 ## 1. Core Goal
 
-**One command to deploy a bare Talos cluster on Proxmox:**
+**One command to deploy a bare Talos cluster on either platform:**
+
 ```bash
-ansible-playbook site.yml
+# Proxmox (dev/staging)
+cd ansible
+ansible-playbook -i environments/proxmox/hosts.yml environments/proxmox/site.yml
+
+# OVH VPS (production)
+cd ansible
+ansible-playbook -i environments/ovh/hosts.yml environments/ovh/site.yml
 ```
 
 **One command to tear it down:**
 ```bash
-ansible-playbook destroy.yml
+ansible-playbook -i environments/proxmox/hosts.yml environments/proxmox/destroy.yml
+ansible-playbook -i environments/ovh/hosts.yml environments/ovh/destroy.yml
 ```
 
 ---
@@ -25,42 +33,65 @@ ansible-playbook destroy.yml
 | Decision | Rationale |
 |----------|-----------|
 | **Ansible over Terraform** | Terraform's `stop_on_destroy` with Talos VMs is dangerously slow (5+ min ACPI timeout). Ansible handles VM lifecycle, imperative bootstrap steps (talosctl, helm), and teardown cleanly. |
-| **No shell scripts** | All automation lives in Ansible roles. No `init-cluster.sh` or `add-worker.sh`. |
-| **Cilium via Helm** (not inline manifest) | Post-bootstrap `helm install` is simpler and more maintainable than embedding 1600+ lines of YAML in Talos config. Nodes are `NotReady` until Cilium deploys — this is expected. |
-| **No `machine.network.hostname`** | dnsmasq assigns hostnames via DHCP (MAC-based). Talos v1.12.4 rejects configs with hostname if DHCP already set one. |
-| **Proxmox API modules on localhost** | `community.proxmox.proxmox_kvm` uses REST API + `proxmoxer` library. Runs on controller with `delegate_to: localhost`. |
-| **talosctl/helm on Proxmox host** | VMs are on internal vmbr1 (10.10.0.0/24), not reachable from laptop. All cluster commands run on Proxmox via SSH. |
+| **Unified repo, two environments** | Common roles (`talos_bootstrap`, `cilium`) shared across platforms. Platform-specific roles (`proxmox_vms`, `talos_install`) only where needed. |
+| **No shell scripts** | All automation lives in Ansible roles. |
+| **Cilium via Helm** (not inline manifest) | Post-bootstrap `helm install` is simpler than embedding 1600+ lines of YAML in Talos config. Nodes are `NotReady` until Cilium deploys — this is expected. |
+| **No `machine.network.hostname`** | dnsmasq assigns hostnames via DHCP (Proxmox). Talos auto-generates (OVH). Talos v1.12.4 rejects configs if DHCP already set hostname. |
+| **`deviceSelector: { physical: true }`** | Replaces `interface: eth0` for VIP and network config. Works across both QEMU and bare metal. |
+| **Factory installer image** | Required for extensions persistence (iscsi-tools, util-linux-tools, qemu-guest-agent). |
 
 ---
 
 ## 3. Architecture
 
+### 3.1 Proxmox (dev/staging)
+
 ```
-┌─────────────────────────────────────────────┐
-│     ansible-playbook site.yml               │
-│     (infra-proxmox/ansible/)                │
-└─────────────────────────────────────────────┘
+ansible-playbook -i environments/proxmox/hosts.yml environments/proxmox/site.yml
+    │
+    ├── Role: proxmox_vms          (Proxmox-only)
+    │   ├── Download Talos ISO (get_url on Proxmox host)
+    │   ├── Create VMs (proxmox_kvm → REST API from localhost)
+    │   └── Start VMs
+    │
+    ├── Role: talos_bootstrap      (COMMON)
+    │   ├── Generate secrets (talosctl on Proxmox host)
+    │   ├── Generate config patches (Jinja2 templates)
+    │   ├── Generate configs from secrets + patches
+    │   ├── Apply configs to each node
+    │   ├── Bootstrap etcd
+    │   └── Fetch kubeconfig
+    │
+    ├── Role: proxmox_post_install (Proxmox-only)
+    │   └── Switch boot order to disk-first, detach ISO
+    │
+    └── Role: cilium               (COMMON)
+        ├── helm install Cilium
+        └── Wait for all nodes Ready
+```
+
+### 3.2 OVH VPS (production)
+
+```
+ansible-playbook -i environments/ovh/hosts.yml environments/ovh/site.yml
+    │
+    ├── Play 1 — hosts: rescue_mode
+    │   └── Role: talos_install    (OVH-only)
+    │       ├── Download Talos metal RAW image
+    │       ├── dd image to /dev/sda
+    │       └── Reboot into Talos
+    │
+    └── Play 2 — hosts: localhost
+        ├── Role: talos_bootstrap  (COMMON, talosctl_delegate_to: localhost)
+        │   ├── Generate secrets (talosctl locally)
+        │   ├── Generate config patches
+        │   ├── Apply configs via public IPs
+        │   ├── Bootstrap etcd
+        │   └── Save kubeconfig locally
         │
-        ├── Role: proxmox_vms
-        │   ├── Download Talos ISO (get_url on Proxmox host)
-        │   ├── Create VMs (proxmox_kvm → REST API from localhost)
-        │   └── Start VMs
-        │
-        ├── Role: talos_cluster
-        │   ├── Generate secrets (talosctl on Proxmox host)
-        │   ├── Generate config patches (Jinja2 templates)
-        │   ├── Generate configs from secrets + patches
-        │   ├── Apply configs to each node
-        │   ├── Bootstrap control plane
-        │   └── Fetch kubeconfig
-        │
-        └── Role: cilium
-            ├── helm repo add + helm upgrade --install (on Proxmox host)
+        └── Role: cilium           (COMMON, talosctl_delegate_to: localhost)
+            ├── helm install Cilium
             └── Wait for all nodes Ready
-                    │
-                    ▼
-            Cluster is RUNNING
-            (ArgoCD manages apps later)
 ```
 
 ---
@@ -69,77 +100,59 @@ ansible-playbook destroy.yml
 
 ```
 fluodata-infrastructure/
-├── EXPERIENCE.md              # Hard-won deployment lessons
-├── DESIGN.md                  # This file
-├── REQUIREMENTS.md            # Requirements spec
+├── ansible/
+│   ├── ansible.cfg
+│   ├── environments/
+│   │   ├── proxmox/
+│   │   │   ├── hosts.yml              # Proxmox host (192.168.122.70)
+│   │   │   ├── group_vars/all.yml     # Proxmox vars, node defs, network
+│   │   │   ├── site.yml               # proxmox_vms → talos_bootstrap → proxmox_post_install → cilium
+│   │   │   └── destroy.yml            # Stop + destroy VMs
+│   │   └── ovh/
+│   │       ├── hosts.yml              # VPS nodes (rescue mode) + localhost
+│   │       ├── group_vars/all.yml     # OVH vars, public IPs, vRack
+│   │       ├── site.yml               # talos_install → talos_bootstrap → cilium
+│   │       └── destroy.yml            # talosctl reset
+│   └── roles/
+│       ├── proxmox_vms/               # Proxmox-only: create/start VMs
+│       ├── proxmox_post_install/      # Proxmox-only: boot order fix
+│       ├── talos_install/             # OVH-only: dd image in rescue mode
+│       ├── talos_bootstrap/           # COMMON: secrets, configs, apply, bootstrap
+│       └── cilium/                    # COMMON: helm install Cilium
 │
-├── infra-proxmox/
-│   ├── ansible/               # Active deployment
-│   │   ├── ansible.cfg
-│   │   ├── site.yml           # Full deploy playbook
-│   │   ├── destroy.yml        # Teardown playbook
-│   │   ├── inventory/
-│   │   │   ├── hosts.yml
-│   │   │   └── group_vars/
-│   │   │       └── all.yml    # All config in one place
-│   │   └── roles/
-│   │       ├── proxmox_vms/
-│   │       ├── talos_cluster/
-│   │       └── cilium/
-│   │
-│   ├── talos/                 # Generated files (by Ansible)
-│   │   ├── secrets.yaml       # Cluster secrets (reusable)
-│   │   ├── talosconfig
-│   │   └── kubeconfig
-│   │
-│   └── terraform/             # Legacy (kept for reference)
-│
-└── cluster-gitops/            # (future) ArgoCD apps
+├── talos/                             # Generated files (secrets, kubeconfig, talosconfig)
+├── _archive/terraform/                # Legacy Terraform code
+├── DESIGN.md                          # This file
+├── EXPERIENCE.md                      # Hard-won deployment lessons
+├── REQUIREMENTS.md                    # Original requirements
+└── .gitignore
 ```
 
 ---
 
-## 5. Ansible Scope
+## 5. Platform Parameterization
 
-### 5.1 What Ansible Does
+Common roles (`talos_bootstrap`, `cilium`) work across platforms via these variables:
 
-1. **Create VMs** on Proxmox
-   - Control plane + worker nodes
-   - Deterministic MAC addresses for DHCP
-   - Boot + Longhorn disks (workers only)
-
-2. **Generate Talos configs**
-   - Cluster secrets (generated once, reused)
-   - Config patches via Jinja2 templates (per-role + per-node)
-   - No hostname in patches (dnsmasq handles it)
-
-3. **Bootstrap cluster**
-   - Apply configs to all nodes
-   - Bootstrap control plane etcd
-   - Fetch kubeconfig
-
-4. **Install Cilium** via Helm
-   - Post-bootstrap (nodes NotReady until CNI deploys)
-   - Wait for all nodes Ready
-
-### 5.2 What Ansible Does NOT Do
-
-- **Kubernetes workloads** — that's ArgoCD's job
-- **Proxmox host setup** — assumed pre-configured (dnsmasq, bridges, tools)
-- **WireGuard** — manual or separate automation
+| Variable | Proxmox | OVH | Purpose |
+|----------|---------|-----|---------|
+| `talosctl_delegate_to` | *undefined* (runs on inventory host) | `"localhost"` (runs locally) | Where talosctl/kubectl/helm execute |
+| `talos_work_dir` | `/tmp/talos-deploy` (on Proxmox host) | `../../talos` (local) | Where talosctl operates |
+| `talos_local_dir` | `../../talos` (local) | `../../talos` (local) | Where secrets/kubeconfig are persisted |
+| `talos_install_disk` | `/dev/sda` | `/dev/sda` or `/dev/vda` | Target disk for Talos install |
+| `cluster_vip` | `10.10.0.5` | *undefined* (no VIP on OVH) | Virtual IP for HA API access |
 
 ---
 
-## 6. Network
+## 6. Platforms
 
-- **Internal network**: 10.10.0.0/24 (Proxmox vmbr1)
+### 6.1 Proxmox (dev/staging)
+
+- **Network**: 10.10.0.0/24 on vmbr1 (internal)
 - **DHCP**: dnsmasq on vmbr1 with MAC-based leases + hostnames
 - **Gateway/DNS**: 10.10.0.1 (Proxmox host)
-- **Public ports** (via port forwarding): 80, 443, 1883, 8883
-
----
-
-## 7. Node Definitions
+- **talosctl runs on**: Proxmox host (VMs unreachable from laptop)
+- **Nodes**: 1 CP + 2 workers (separate roles)
 
 | Node     | VMID | IP         | vCPU | RAM   | Boot | Longhorn |
 |----------|------|------------|------|-------|------|----------|
@@ -147,43 +160,45 @@ fluodata-infrastructure/
 | worker-0 | 120  | 10.10.0.20 | 4    | 8 GB  | 20G  | 20G      |
 | worker-1 | 121  | 10.10.0.21 | 4    | 8 GB  | 20G  | 20G      |
 
----
+### 6.2 OVH VPS (production)
 
-## 8. Deployment Flow
-
-```bash
-# From infra-proxmox/ansible/ directory:
-
-# Deploy everything (~5 minutes)
-ansible-playbook site.yml
-
-# Tear down (stop + destroy VMs)
-ansible-playbook destroy.yml
-```
-
-### Prerequisites on Proxmox host:
-- dnsmasq configured on vmbr1 with MAC-based DHCP + hostnames
-- `talosctl`, `kubectl`, `helm` installed
-- SSH key auth from laptop
-
-### Prerequisites on laptop:
-- `ansible-core` via pipx with `proxmoxer`, `requests`, `requests-toolbelt` injected
-- `community.proxmox` collection installed
+- **Network**: Public IPs (OVH-assigned) + vRack private subnet
+- **No VIP**: OVH doesn't support gratuitous ARP on public IPs
+- **Firewall**: OVH network firewall (mandatory — Talos has no host firewall)
+- **talosctl runs on**: Laptop/CI (nodes have public IPs)
+- **Nodes**: 3x combined CP+worker (8 vCPU, 24 GB RAM, 200 GB NVMe each)
+- **Install method**: Rescue mode + `dd` (no custom ISO upload on VPS)
+- **Cost**: ~50 PLN/month per VPS
 
 ---
 
-## 9. Key Lessons (see EXPERIENCE.md for full details)
+## 7. Security (OVH)
 
-1. **Cilium post-bootstrap via Helm** — simpler than inline manifests
-2. **No hostname in Talos patches** — dnsmasq DHCP conflict with Talos v1.12.4
-3. **Proxmox API modules on localhost** — `delegate_to: localhost` for proxmoxer
-4. **talosctl/helm on Proxmox host** — VMs not reachable from laptop
-5. **Factory image with extensions** — iscsi-tools, util-linux-tools for Longhorn
-6. **Secrets idempotency** — check both local and remote before generating
+Talos has **no host firewall** (no iptables/nftables). All listening ports are reachable on public IPs.
+
+**Required OVH firewall rules:**
+- Allow TCP 50000 (Talos API) — mTLS, but should be IP-restricted
+- Allow TCP 6443 (K8s API) — mTLS, but should be IP-restricted
+- Allow UDP (WireGuard port) — silent without valid key
+- Block everything else inbound
+
+**Admin access**: WireGuard pod running in cluster, UDP port silent without valid key.
 
 ---
 
-## 10. Future: GitOps (ArgoCD) Scope
+## 8. Key Lessons (see EXPERIENCE.md for details)
+
+1. **Boot order fix (Proxmox)** — After Talos installs to disk, switch boot to `scsi0` and detach ISO. Otherwise host suspend/resume causes ISO boot + halt.
+2. **Cilium post-bootstrap via Helm** — simpler than inline manifests
+3. **No hostname in Talos patches** — DHCP/Talos hostname conflict
+4. **Factory image with extensions** — iscsi-tools, util-linux-tools for Longhorn; qemu-guest-agent for Proxmox
+5. **Secrets idempotency** — check both local and remote before generating
+6. **talosconfig empty endpoints** — `talosctl gen config` produces empty endpoints; must run `talosctl config endpoint` after
+7. **OVH VPS vs Public Cloud** — Public Cloud supports ISO upload but costs 16x more. VPS with rescue mode + `dd` is the viable path.
+
+---
+
+## 9. Future: GitOps (ArgoCD) Scope
 
 | App | Purpose |
 |-----|---------|
@@ -197,8 +212,9 @@ ansible-playbook destroy.yml
 
 ---
 
-## 11. Open Questions
+## 10. Open Questions
 
 1. **Secrets**: Same repo with SOPS, or separate?
 2. **CI/CD**: Manual `ansible-playbook` or GitHub Actions?
-3. **Multi-host**: How to handle multiple Proxmox hosts (Phase 3)?
+3. **OVH VIP alternative**: Use DNS round-robin or load balancer for K8s API HA?
+4. **vRack config**: How to configure private networking between VPS nodes?

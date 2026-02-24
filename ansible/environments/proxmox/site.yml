@@ -1,0 +1,16 @@
+---
+# =============================================================================
+# Proxmox — Full cluster deployment
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook -i environments/proxmox/hosts.yml environments/proxmox/site.yml
+# =============================================================================
+- name: Deploy Talos Kubernetes cluster on Proxmox
+  hosts: proxmox
+  gather_facts: false
+  roles:
+    - proxmox_vms
+    - talos_bootstrap
+    - proxmox_post_install
+    - cilium

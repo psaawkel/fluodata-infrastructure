@@ -1,0 +1,80 @@
+---
+# =============================================================================
+# Role: cilium — Install Cilium CNI via Helm
+#
+# Platform-agnostic. Runs on {{ talosctl_delegate_to | default(inventory_host) }}.
+# Nodes are NotReady until Cilium deploys — this is expected.
+# =============================================================================
+
+- name: Add Cilium Helm repo
+  ansible.builtin.command:
+    cmd: helm repo add cilium https://helm.cilium.io/
+  register: helm_repo_result
+  changed_when: "'has been added' in helm_repo_result.stdout"
+  failed_when:
+    - helm_repo_result.rc != 0
+    - "'already exists' not in helm_repo_result.stderr"
+  environment:
+    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
+  become: false
+
+- name: Update Helm repos
+  ansible.builtin.command:
+    cmd: helm repo update
+  environment:
+    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
+  become: false
+
+- name: Install Cilium via Helm
+  ansible.builtin.command:
+    cmd: >-
+      helm upgrade --install cilium cilium/cilium
+        --namespace kube-system
+        --version {{ cilium_version }}
+        --set ipam.mode=kubernetes
+        --set kubeProxyReplacement=true
+        --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}"
+        --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}"
+        --set cgroup.autoMount.enabled=false
+        --set cgroup.hostRoot=/sys/fs/cgroup
+        --set k8sServiceHost=localhost
+        --set k8sServicePort=7445
+        --wait
+        --timeout 5m
+  environment:
+    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+  register: cilium_result
+  changed_when: "'STATUS: deployed' in cilium_result.stdout"
+  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
+  become: false
+
+- name: Wait for all nodes to be Ready
+  ansible.builtin.command:
+    cmd: >-
+      kubectl get nodes
+        -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+  environment:
+    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+  register: nodes_ready
+  until: >-
+    nodes_ready.stdout_lines | select('equalto', 'True') | list | length
+    == (controlplane_nodes | length + worker_nodes | length)
+  retries: 30
+  delay: 10
+  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
+  become: false
+
+- name: Show cluster status
+  ansible.builtin.command:
+    cmd: kubectl get nodes -o wide
+  environment:
+    KUBECONFIG: "{{ talos_work_dir }}/kubeconfig"
+  register: cluster_status
+  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
+  become: false
+
+- name: Display cluster status
+  ansible.builtin.debug:
+    msg: "{{ cluster_status.stdout_lines }}"
