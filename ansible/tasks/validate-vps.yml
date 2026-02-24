@@ -44,6 +44,9 @@
     ansible_host: "{{ item.rescue_ssh_host | default(item.ip) }}"
     ansible_user: "{{ item.rescue_ssh_user | default('root') }}"
     groups: rescue_mode
+    # Pass vars needed by talos_install role
+    talos_metal_image_url: "{{ talos_metal_image_url }}"
+    talos_install_disk: "{{ talos_install_disk }}"
   loop: "{{ controlplane_nodes + (worker_nodes | default([])) }}"
   loop_control:
     label: "{{ item.name }}"

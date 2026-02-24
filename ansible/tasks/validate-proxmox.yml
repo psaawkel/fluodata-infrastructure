@@ -60,6 +60,32 @@
     ansible_host: "{{ proxmox_ssh_host }}"
     ansible_user: "{{ proxmox_ssh_user }}"
     groups: proxmox_hosts
+    # Pass all computed vars — set_fact on localhost doesn't propagate to dynamic hosts
+    env_dir: "{{ env_dir }}"
+    cluster_name: "{{ cluster_name }}"
+    cluster_vip: "{{ cluster_vip | default(omit) }}"
+    cluster_endpoint: "{{ cluster_endpoint }}"
+    talos_version: "{{ talos_version }}"
+    talos_schematic_id: "{{ talos_schematic_id }}"
+    talos_iso_url: "{{ talos_iso_url }}"
+    talos_iso_filename: "{{ talos_iso_filename }}"
+    talos_iso_storage: "{{ talos_iso_storage }}"
+    talos_install_image: "{{ talos_install_image }}"
+    talos_install_disk: "{{ talos_install_disk }}"
+    controlplane_nodes: "{{ controlplane_nodes }}"
+    worker_nodes: "{{ worker_nodes }}"
+    all_nodes: "{{ all_nodes }}"
+    vm_bridge: "{{ vm_bridge }}"
+    vm_gateway: "{{ vm_gateway }}"
+    vm_subnet_mask: "{{ vm_subnet_mask }}"
+    vm_nameservers: "{{ vm_nameservers }}"
+    vm_storage: "{{ vm_storage }}"
+    cilium_version: "{{ cilium_version }}"
+    proxmox_host: "{{ proxmox_host }}"
+    proxmox_node: "{{ proxmox_node }}"
+    proxmox_api_user: "{{ proxmox_api_user }}"
+    proxmox_api_token_id: "{{ proxmox_api_token_id }}"
+    proxmox_api_token_secret: "{{ proxmox_api_token_secret }}"
 
 - name: Show deployment info
   ansible.builtin.debug:
