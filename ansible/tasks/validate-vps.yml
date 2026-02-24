@@ -1,0 +1,58 @@
+---
+# tasks/validate-vps.yml — Validate VPS config and set computed variables
+#
+# Prerequisite: tasks/load-config.yml must run first
+
+- name: Validate platform is vps
+  ansible.builtin.fail:
+    msg: "This playbook is for VPS environments. config.yml has platform='{{ platform | default('undefined') }}'"
+  when: platform | default('') != 'vps'
+
+- name: Validate required VPS fields
+  ansible.builtin.fail:
+    msg: "Missing required field: {{ item }}"
+  loop:
+    - cluster_name
+    - talos_version
+    - talos_schematic_id
+    - controlplane_nodes
+    - vm_gateway
+  when: lookup('vars', item, default='__MISSING__') == '__MISSING__'
+
+- name: Set computed variables
+  ansible.builtin.set_fact:
+    env_dir: "{{ env_dir }}"
+    cluster_name: "{{ cluster_name }}"
+    cluster_endpoint: "{{ 'https://' ~ controlplane_nodes[0].ip ~ ':6443' }}"
+    talos_version: "{{ talos_version }}"
+    talos_schematic_id: "{{ talos_schematic_id }}"
+    talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
+    talos_install_disk: "{{ talos_install_disk | default('/dev/sda') }}"
+    talos_metal_image_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/metal-amd64.raw.xz"
+    controlplane_nodes: "{{ controlplane_nodes }}"
+    worker_nodes: "{{ worker_nodes | default([]) }}"
+    all_nodes: "{{ controlplane_nodes + (worker_nodes | default([])) }}"
+    vm_gateway: "{{ vm_gateway }}"
+    vm_subnet_mask: "{{ vm_subnet_mask | default(32) }}"
+    vm_nameservers: "{{ vm_nameservers | default(['213.186.33.99', '1.1.1.1']) }}"
+    cilium_version: "{{ cilium_version | default('1.17.3') }}"
+    talosctl_delegate_to: localhost
+
+- name: Add rescue mode hosts to inventory
+  ansible.builtin.add_host:
+    name: "{{ item.name }}"
+    ansible_host: "{{ item.rescue_ssh_host | default(item.ip) }}"
+    ansible_user: "{{ item.rescue_ssh_user | default('root') }}"
+    groups: rescue_mode
+  loop: "{{ controlplane_nodes + (worker_nodes | default([])) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Show deployment info
+  ansible.builtin.debug:
+    msg: |
+      Cluster:     {{ cluster_name }}
+      Endpoint:    {{ cluster_endpoint }}
+      Env folder:  {{ env_dir }}
+      CP nodes:    {{ controlplane_nodes | map(attribute='name') | join(', ') }}
+      Workers:     {{ (worker_nodes | default([])) | map(attribute='name') | join(', ') | default('(none)') }}

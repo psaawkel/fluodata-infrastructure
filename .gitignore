@@ -23,9 +23,9 @@ override.tf.json
 # Environment folders — gitignored (contain secrets + generated files).
 # Only *-example/ folders are committed.
 environments/proxmox-*/
-environments/ovh-*/
+environments/vps-*/
 !environments/proxmox-example/
-!environments/ovh-example/
+!environments/vps-example/
 
 # OS
 .DS_Store

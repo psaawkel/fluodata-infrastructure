@@ -2,15 +2,15 @@
 # =============================================================================
 # Role: talos_bootstrap — Generate secrets, configs, apply, bootstrap, kubeconfig
 #
-# Platform-agnostic. Works for both Proxmox and OVH.
+# Platform-agnostic. Works for both Proxmox and VPS.
 #
 # Key variables:
 #   - env_dir:              Local env folder — all final files end up here
-#   - talos_work_dir:       Where talosctl runs. For OVH = env_dir. For Proxmox = remote tmp dir.
-#   - talosctl_delegate_to: undefined = run on inventory host (Proxmox), "localhost" = run locally (OVH)
+#   - talos_work_dir:       Where talosctl runs. For VPS = env_dir. For Proxmox = remote tmp dir.
+#   - talosctl_delegate_to: undefined = run on inventory host (Proxmox), "localhost" = run locally (VPS)
 #
 # Proxmox flow: talosctl runs on Proxmox host (remote), results fetched to env_dir
-# OVH flow:     talosctl runs locally, talos_work_dir = env_dir, no fetching needed
+# VPS flow:     talosctl runs locally, talos_work_dir = env_dir, no fetching needed
 # =============================================================================
 
 # --- Determine remote work dir for Proxmox ---
@@ -19,7 +19,7 @@
     _talos_remote_dir: /tmp/talos-deploy
   when: talosctl_delegate_to is not defined
 
-- name: Set remote work directory (OVH / localhost)
+- name: Set remote work directory (VPS / localhost)
   ansible.builtin.set_fact:
     _talos_remote_dir: "{{ env_dir }}"
   when: talosctl_delegate_to is defined
@@ -277,7 +277,7 @@
   become: false
 
 # =============================================================================
-# Fetch all generated files to env dir (Proxmox only — OVH already local)
+# Fetch all generated files to env dir (Proxmox only — VPS already local)
 # =============================================================================
 - name: Fetch generated files to env dir
   ansible.builtin.fetch:

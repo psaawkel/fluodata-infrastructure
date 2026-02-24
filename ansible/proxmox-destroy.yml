@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# proxmox-destroy.yml — Tear down Proxmox cluster VMs
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook proxmox-destroy.yml -e env=../environments/proxmox-homelab
+# =============================================================================
+
+# --- Load config, validate, add Proxmox host ---
+- name: Load and validate Proxmox config
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_tasks: tasks/load-config.yml
+    - ansible.builtin.include_tasks: tasks/validate-proxmox.yml
+
+# --- Destroy VMs ---
+- name: Destroy Talos cluster VMs
+  hosts: proxmox_hosts
+  gather_facts: false
+  tasks:
+    - name: Stop all VMs
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ proxmox_node }}"
+        vmid: "{{ item.vmid }}"
+        state: stopped
+        force: true
+        timeout: 60
+      loop: "{{ all_nodes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Destroy all VMs
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ proxmox_node }}"
+        vmid: "{{ item.vmid }}"
+        state: absent
+        force: true
+        timeout: 120
+      loop: "{{ all_nodes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true

@@ -1,8 +1,8 @@
 ---
 # =============================================================================
-# Role: talos_install — Write Talos disk image to OVH VPS nodes
+# Role: talos_install — Write Talos disk image to VPS nodes
 #
-# Assumes VPS nodes are booted into OVH rescue mode (Debian-based).
+# Assumes VPS nodes are booted into rescue mode (Debian-based).
 # Downloads Talos metal image and writes it directly to disk with dd.
 # After reboot, VPS boots Talos from disk in maintenance mode.
 #

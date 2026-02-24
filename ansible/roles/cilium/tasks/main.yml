@@ -12,7 +12,7 @@
     _talos_remote_dir: /tmp/talos-deploy
   when: talosctl_delegate_to is not defined
 
-- name: Set remote work directory (OVH / localhost)
+- name: Set remote work directory (VPS / localhost)
   ansible.builtin.set_fact:
     _talos_remote_dir: "{{ env_dir }}"
   when: talosctl_delegate_to is defined

@@ -1,0 +1,71 @@
+---
+# tasks/validate-proxmox.yml — Validate Proxmox config and set computed variables
+#
+# Prerequisite: tasks/load-config.yml must run first
+
+- name: Validate platform is proxmox
+  ansible.builtin.fail:
+    msg: "This playbook is for Proxmox environments. config.yml has platform='{{ platform | default('undefined') }}'"
+  when: platform | default('') != 'proxmox'
+
+- name: Validate required Proxmox fields
+  ansible.builtin.fail:
+    msg: "Missing required field: {{ item }}"
+  loop:
+    - proxmox_host
+    - proxmox_node
+    - proxmox_api_user
+    - proxmox_api_token_id
+    - proxmox_api_token_secret
+    - proxmox_ssh_host
+    - proxmox_ssh_user
+    - cluster_name
+    - talos_version
+    - talos_schematic_id
+    - controlplane_nodes
+    - vm_gateway
+  when: lookup('vars', item, default='__MISSING__') == '__MISSING__'
+
+- name: Set computed variables
+  ansible.builtin.set_fact:
+    env_dir: "{{ env_dir }}"
+    cluster_name: "{{ cluster_name }}"
+    cluster_vip: "{{ cluster_vip | default(omit) }}"
+    cluster_endpoint: "{{ 'https://' ~ (cluster_vip | default(controlplane_nodes[0].ip)) ~ ':6443' }}"
+    talos_version: "{{ talos_version }}"
+    talos_schematic_id: "{{ talos_schematic_id }}"
+    talos_iso_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/nocloud-amd64.iso"
+    talos_iso_filename: "talos-{{ talos_version }}.iso"
+    talos_iso_storage: "{{ talos_iso_storage | default('local') }}"
+    talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
+    talos_install_disk: "{{ talos_install_disk | default('/dev/sda') }}"
+    controlplane_nodes: "{{ controlplane_nodes }}"
+    worker_nodes: "{{ worker_nodes | default([]) }}"
+    all_nodes: "{{ controlplane_nodes + (worker_nodes | default([])) }}"
+    vm_bridge: "{{ vm_bridge | default('vmbr1') }}"
+    vm_gateway: "{{ vm_gateway }}"
+    vm_subnet_mask: "{{ vm_subnet_mask | default(24) }}"
+    vm_nameservers: "{{ vm_nameservers | default(['1.1.1.1']) }}"
+    vm_storage: "{{ vm_storage | default('local-lvm') }}"
+    cilium_version: "{{ cilium_version | default('1.17.3') }}"
+    proxmox_host: "{{ proxmox_host }}"
+    proxmox_node: "{{ proxmox_node }}"
+    proxmox_api_user: "{{ proxmox_api_user }}"
+    proxmox_api_token_id: "{{ proxmox_api_token_id }}"
+    proxmox_api_token_secret: "{{ proxmox_api_token_secret }}"
+
+- name: Add Proxmox host to inventory
+  ansible.builtin.add_host:
+    name: proxmox
+    ansible_host: "{{ proxmox_ssh_host }}"
+    ansible_user: "{{ proxmox_ssh_user }}"
+    groups: proxmox_hosts
+
+- name: Show deployment info
+  ansible.builtin.debug:
+    msg: |
+      Cluster:     {{ cluster_name }}
+      Endpoint:    {{ cluster_endpoint }}
+      Env folder:  {{ env_dir }}
+      CP nodes:    {{ controlplane_nodes | map(attribute='name') | join(', ') }}
+      Workers:     {{ (worker_nodes | default([])) | map(attribute='name') | join(', ') | default('(none)') }}

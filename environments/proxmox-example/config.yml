@@ -8,14 +8,14 @@
 #
 # Deploy:
 #   cd ansible
-#   ansible-playbook deploy-proxmox.yml -e env=../environments/proxmox-homelab
+#   ansible-playbook proxmox-deploy.yml -e env=../environments/proxmox-homelab
 #
 # Destroy:
-#   ansible-playbook destroy-proxmox.yml -e env=../environments/proxmox-homelab
+#   ansible-playbook proxmox-destroy.yml -e env=../environments/proxmox-homelab
 # =============================================================================
 
 # --- Platform ---
-# Must be "proxmox" or "ovh". Controls which roles run and validates config.
+# Must be "proxmox" or "vps". Controls which playbook to use.
 platform: proxmox
 
 # --- Proxmox connection ---

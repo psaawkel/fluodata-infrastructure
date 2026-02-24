@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# vps-destroy.yml — Reset Talos cluster on VPS nodes
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook vps-destroy.yml -e env=../environments/vps-prod
+#
+# This resets Talos nodes (wipes etcd + Kubernetes state).
+# To fully decommission, cancel the VPS in your provider's panel.
+# =============================================================================
+
+# --- Load config, validate, reset nodes ---
+- name: Load config and reset Talos cluster
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_tasks: tasks/load-config.yml
+    - ansible.builtin.include_tasks: tasks/validate-vps.yml
+
+    - name: Reset all nodes
+      ansible.builtin.command:
+        cmd: >-
+          talosctl reset
+            --talosconfig {{ env_dir }}/talosconfig
+            --nodes {{ item.ip }}
+            --endpoints {{ item.ip }}
+            --graceful=false
+            --reboot
+      loop: "{{ all_nodes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      ignore_errors: true

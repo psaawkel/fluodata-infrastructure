@@ -1,0 +1,36 @@
+---
+# =============================================================================
+# vps-deploy.yml — Deploy Talos cluster on VPS nodes (rescue mode + dd)
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook vps-deploy.yml -e env=../environments/vps-prod
+#
+# Prerequisites:
+#   1. VPS ordered and IPs filled in config.yml
+#   2. VPS booted into rescue mode (for talos_install stage)
+#   3. talosctl, kubectl, helm installed locally
+# =============================================================================
+
+# --- Load config, validate, add rescue hosts ---
+- name: Load and validate VPS config
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_tasks: tasks/load-config.yml
+    - ansible.builtin.include_tasks: tasks/validate-vps.yml
+
+# --- Install Talos via rescue mode ---
+- name: Install Talos on VPS nodes (rescue mode)
+  hosts: rescue_mode
+  gather_facts: false
+  roles:
+    - talos_install
+
+# --- Bootstrap Talos and install Cilium (locally) ---
+- name: Bootstrap Talos cluster and install Cilium
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - talos_bootstrap
+    - cilium

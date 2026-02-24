@@ -1,22 +1,22 @@
 # =============================================================================
-# OVH VPS environment config — EXAMPLE
+# VPS environment config — EXAMPLE
 #
 # Copy this folder and fill in your values:
 #   cd environments
-#   cp -r ovh-example/ ovh-prod/
-#   vim ovh-prod/config.yml
+#   cp -r vps-example/ vps-prod/
+#   vim vps-prod/config.yml
 #
 # Deploy:
 #   cd ansible
-#   ansible-playbook deploy-ovh.yml -e env=../environments/ovh-prod
+#   ansible-playbook vps-deploy.yml -e env=../environments/vps-prod
 #
 # Destroy:
-#   ansible-playbook destroy-ovh.yml -e env=../environments/ovh-prod
+#   ansible-playbook vps-destroy.yml -e env=../environments/vps-prod
 # =============================================================================
 
 # --- Platform ---
-# Must be "proxmox" or "ovh". Controls which roles run and validates config.
-platform: ovh
+# Must be "proxmox" or "vps". Controls which playbook to use.
+platform: vps
 
 # --- Talos ---
 talos_version: v1.12.4
@@ -26,13 +26,13 @@ talos_install_disk: /dev/sda
 
 # --- Cluster ---
 cluster_name: fluodata
-# No VIP on OVH — no shared L2 for gratuitous ARP.
+# No VIP on VPS — no shared L2 for gratuitous ARP.
 # cluster_vip is intentionally NOT set. API endpoint uses first CP node IP.
 
 # --- Network ---
-# OVH public network — each node has a public IP assigned by OVH.
-# Gateway is the OVH-assigned gateway for your IP block.
-vm_gateway: REPLACE_WITH_OVH_GATEWAY
+# Public network — each node has a public IP assigned by the VPS provider.
+# Gateway is the provider-assigned gateway for your IP block.
+vm_gateway: REPLACE_WITH_GATEWAY
 vm_subnet_mask: 32
 vm_nameservers:
   - 213.186.33.99
@@ -40,7 +40,7 @@ vm_nameservers:
 
 # --- Nodes ---
 # All 3 nodes are combined controlplane + worker.
-# Each needs: name, ip (public IP assigned by OVH)
+# Each needs: name, ip (public IP)
 # For rescue mode install, also: rescue_ssh_host (same as ip usually), rescue_ssh_user (root)
 controlplane_nodes:
   - name: node-0
