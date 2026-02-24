@@ -36,13 +36,18 @@
     vm_subnet_mask: "{{ vm_subnet_mask | default(32) }}"
     vm_nameservers: "{{ vm_nameservers | default(['213.186.33.99', '1.1.1.1']) }}"
     cilium_version: "{{ cilium_version | default('1.17.3') }}"
-    talosctl_delegate_to: localhost
+    allow_scheduling_on_controlplanes: "{{ allow_scheduling_on_controlplanes | default((worker_nodes | default([])) | length == 0) }}"
 
 - name: Add rescue mode hosts to inventory
   ansible.builtin.add_host:
     name: "{{ item.name }}"
     ansible_host: "{{ item.rescue_ssh_host | default(item.ip) }}"
     ansible_user: "{{ item.rescue_ssh_user | default('root') }}"
+    ansible_ssh_pass: "{{ item.rescue_ssh_pass | default(omit) }}"
+    ansible_ssh_extra_args: >-
+      -o StrictHostKeyChecking=no
+      -o UserKnownHostsFile=/dev/null
+      {{ '-o PubkeyAuthentication=no' if item.rescue_ssh_pass is defined else '' }}
     groups: rescue_mode
     # Pass vars needed by talos_install role
     talos_metal_image_url: "{{ talos_metal_image_url }}"

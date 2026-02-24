@@ -48,6 +48,8 @@
     vm_nameservers: "{{ vm_nameservers | default(['1.1.1.1']) }}"
     vm_storage: "{{ vm_storage | default('local-lvm') }}"
     cilium_version: "{{ cilium_version | default('1.17.3') }}"
+    etcd_advertised_subnets:
+      - "{{ vm_gateway }}/{{ vm_subnet_mask | default(24) }}"
     dhcp_range_start: "{{ dhcp_range_start | default('10.10.0.100') }}"
     dhcp_range_end: "{{ dhcp_range_end | default('10.10.0.200') }}"
     dhcp_lease_time: "{{ dhcp_lease_time | default('12h') }}"
@@ -63,18 +65,16 @@
     ansible_host: "{{ proxmox_ssh_host }}"
     ansible_user: "{{ proxmox_ssh_user }}"
     groups: proxmox_hosts
-    # Pass all computed vars — set_fact on localhost doesn't propagate to dynamic hosts
+    # Pass vars needed by Play 2 roles (set_fact on localhost doesn't propagate)
+    # Used by: proxmox_dnsmasq, proxmox_vms, talos_bootstrap_proxmox, proxmox_post_install, cilium
     env_dir: "{{ env_dir }}"
     cluster_name: "{{ cluster_name }}"
     cluster_vip: "{{ cluster_vip | default(omit) }}"
     cluster_endpoint: "{{ cluster_endpoint }}"
     talos_version: "{{ talos_version }}"
-    talos_schematic_id: "{{ talos_schematic_id }}"
     talos_iso_url: "{{ talos_iso_url }}"
     talos_iso_filename: "{{ talos_iso_filename }}"
     talos_iso_storage: "{{ talos_iso_storage }}"
-    talos_install_image: "{{ talos_install_image }}"
-    talos_install_disk: "{{ talos_install_disk }}"
     controlplane_nodes: "{{ controlplane_nodes }}"
     worker_nodes: "{{ worker_nodes }}"
     all_nodes: "{{ all_nodes }}"

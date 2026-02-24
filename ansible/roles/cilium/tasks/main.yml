@@ -2,20 +2,9 @@
 # =============================================================================
 # Role: cilium — Install Cilium CNI via Helm
 #
-# Platform-agnostic. Uses kubeconfig from the work directory.
-# Nodes are NotReady until Cilium deploys — this is expected.
+# Requires kubeconfig_path to be set by the preceding bootstrap role.
+# Runs on whatever host the playbook targets (Proxmox host or localhost).
 # =============================================================================
-
-# Determine where kubeconfig is (same logic as talos_bootstrap)
-- name: Set remote work directory (Proxmox)
-  ansible.builtin.set_fact:
-    _talos_remote_dir: "/tmp/talos-deploy/{{ env_dir | basename }}"
-  when: talosctl_delegate_to is not defined
-
-- name: Set remote work directory (VPS / localhost)
-  ansible.builtin.set_fact:
-    _talos_remote_dir: "{{ env_dir }}"
-  when: talosctl_delegate_to is defined
 
 - name: Add Cilium Helm repo
   ansible.builtin.command:
@@ -26,17 +15,17 @@
     - helm_repo_result.rc != 0
     - "'already exists' not in helm_repo_result.stderr"
   environment:
-    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
-  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
-  become: false
+    KUBECONFIG: "{{ kubeconfig_path }}"
 
 - name: Update Helm repos
   ansible.builtin.command:
     cmd: helm repo update
   environment:
-    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
-  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
-  become: false
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Compute total node count
+  ansible.builtin.set_fact:
+    _total_nodes: "{{ (controlplane_nodes | length) + (worker_nodes | default([]) | length) }}"
 
 - name: Install Cilium via Helm
   ansible.builtin.command:
@@ -52,14 +41,13 @@
         --set cgroup.hostRoot=/sys/fs/cgroup
         --set k8sServiceHost=localhost
         --set k8sServicePort=7445
+        --set operator.replicas={{ [_total_nodes | int, 2] | min }}
         --wait
         --timeout 5m
   environment:
-    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
+    KUBECONFIG: "{{ kubeconfig_path }}"
   register: cilium_result
   changed_when: "'STATUS: deployed' in cilium_result.stdout"
-  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
-  become: false
 
 - name: Wait for all nodes to be Ready
   ansible.builtin.command:
@@ -67,24 +55,20 @@
       kubectl get nodes
         -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
   environment:
-    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
+    KUBECONFIG: "{{ kubeconfig_path }}"
   register: nodes_ready
   until: >-
     nodes_ready.stdout_lines | select('equalto', 'True') | list | length
     == (controlplane_nodes | length + (worker_nodes | default([]) | length))
   retries: 30
   delay: 10
-  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
-  become: false
 
 - name: Show cluster status
   ansible.builtin.command:
     cmd: kubectl get nodes -o wide
   environment:
-    KUBECONFIG: "{{ _talos_remote_dir }}/kubeconfig"
+    KUBECONFIG: "{{ kubeconfig_path }}"
   register: cluster_status
-  delegate_to: "{{ talosctl_delegate_to | default(omit) }}"
-  become: false
 
 - name: Display cluster status
   ansible.builtin.debug:

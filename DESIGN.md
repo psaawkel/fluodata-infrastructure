@@ -1,7 +1,7 @@
 # FluoData Infrastructure — Unified Multi-Platform Design
 
 **Version:** 3.1 (Ansible-based, multi-platform, env-folder pattern)  
-**Status:** Proxmox working (pre-refactor test pending), VPS planned  
+**Status:** Proxmox working (pre-refactor test pending), VPS in progress (rescue install tested)  
 **Date:** 2026-02-24
 
 ---
@@ -42,7 +42,7 @@ environments/proxmox-homelab/
 | **Env folder = state folder** | All generated files (secrets, kubeconfig, talosconfig, patches) live in the env folder. Your entire cluster state in one place. |
 | **Gitignored env folders** | Real env folders (`proxmox-*`, `vps-*`) are gitignored. Only `*-example/` are committed. Sync real folders to a secure cloud backup. |
 | **Ansible over Terraform** | Terraform's `stop_on_destroy` with Talos VMs is dangerously slow (5+ min ACPI timeout). Ansible handles the imperative flow cleanly. |
-| **Split playbooks per platform** | `proxmox-deploy.yml`, `vps-deploy.yml`, `proxmox-destroy.yml`, `vps-destroy.yml`. No platform checks inside playbooks — clean linear flow. Playbook validates `platform` field matches and fails early if wrong. |
+| **Split playbooks per platform** | `proxmox-deploy.yml`, `vps-deploy-rescue.yml`, `vps-deploy.yml`, `proxmox-destroy.yml`, `vps-destroy.yml`. No platform checks inside playbooks — clean linear flow. Playbook validates `platform` field matches and fails early if wrong. |
 | **Extracted validations** | Common config loading (`tasks/load-config.yml`) and per-platform validation (`tasks/validate-proxmox.yml`, `tasks/validate-vps.yml`) are in reusable task files. |
 | **Merged plays by host** | Plays targeting the same host are merged into a single play with multiple roles. No unnecessary play boundaries. |
 | **VPS not OVH** | Platform is `vps`, not `ovh` — not tied to a specific provider. Works with any VPS that supports rescue mode boot. |
@@ -60,7 +60,8 @@ fluodata-infrastructure/
 │   ├── ansible.cfg
 │   ├── proxmox-deploy.yml          # Proxmox deploy
 │   ├── proxmox-destroy.yml         # Proxmox destroy
-│   ├── vps-deploy.yml              # VPS deploy
+│   ├── vps-deploy-rescue.yml       # VPS: write Talos to disk (rescue mode)
+│   ├── vps-deploy.yml              # VPS: bootstrap + Cilium (after reboot)
 │   ├── vps-destroy.yml             # VPS destroy
 │   ├── tasks/
 │   │   ├── load-config.yml         # Common: resolve path, load config.yml
@@ -161,18 +162,35 @@ proxmox-deploy.yml -e env=../environments/proxmox-homelab
 
 ### VPS Flow
 
+VPS deploy is a two-step process because the reboot from rescue mode to Talos
+requires a provider-specific action (e.g., OVH: switch netboot from rescue → local
+in the dashboard, then reboot).
+
 ```
-vps-deploy.yml -e env=../environments/vps-prod
+STEP 1: Write Talos to disk (one-time, rescue mode)
+
+vps-deploy-rescue.yml -e env=../environments/vps-prod
     │
     ├── Play 1: localhost
     │   ├── load-config.yml → resolve path, load config.yml
     │   └── validate-vps.yml → check fields, set vars, add rescue hosts
     │
     ├── Play 2: rescue_mode
-    │   └── talos_install    → dd Talos image → reboot
+    │   └── talos_install    → dd Talos image to disk
     │
-    └── Play 3: localhost (single play, 2 roles)
-        ├── talos_bootstrap  → Secrets → patches → configs → apply → bootstrap → kubeconfig
+    └── Play 3: localhost
+        └── Print next steps (switch boot mode, reboot)
+
+--- Manual step: switch VPS to normal boot mode + reboot (provider dashboard) ---
+
+STEP 2: Bootstrap cluster
+
+vps-deploy.yml -e env=../environments/vps-prod
+    │
+    └── Play 1: localhost (pre_tasks + 2 roles)
+        ├── load-config.yml → resolve path, load config.yml
+        ├── validate-vps.yml → check fields, set vars
+        ├── talos_bootstrap  → Wait for Talos API → secrets → patches → configs → apply → bootstrap → kubeconfig
         └── cilium           → Install Cilium, wait for nodes Ready
 ```
 
@@ -201,6 +219,7 @@ vps-deploy.yml -e env=../environments/vps-prod
 5. **Secrets idempotency** — check before generating, reuse across deploys
 6. **talosconfig empty endpoints** — must run `talosctl config endpoint` after gen
 7. **VPS rescue mode** — only viable install path (custom ISO not supported)
+8. **Rescue mode reboot** — rebooting while in rescue mode re-enters rescue (provider sets boot mode). Must switch boot mode to normal/local before reboot. Split into separate `vps-deploy-rescue.yml` and `vps-deploy.yml` playbooks to allow manual reboot step.
 
 ---
 

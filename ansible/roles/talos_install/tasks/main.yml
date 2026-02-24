@@ -34,11 +34,8 @@
     path: /tmp/talos-metal.raw.xz
     state: absent
 
-- name: Reboot into Talos
-  ansible.builtin.reboot:
-    msg: "Rebooting into Talos"
-    reboot_timeout: 0
-  ignore_errors: true
-  # VPS will reboot and SSH (rescue mode) will be gone.
-  # Talos API on port 50000 will be the next contact point.
-  when: "'TALOS' not in disk_check.stdout | default('')"
+# NOTE: This role does NOT reboot. The VPS must be rebooted externally:
+#   - OVH: Switch netboot from rescue → local in dashboard, then reboot
+#   - Other providers: reboot via provider dashboard or API
+# After reboot, Talos boots in maintenance mode (port 50000).
+# Then run vps-deploy.yml for bootstrap + Cilium.

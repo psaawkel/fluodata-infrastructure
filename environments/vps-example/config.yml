@@ -6,7 +6,16 @@
 #   cp -r vps-example/ vps-prod/
 #   vim vps-prod/config.yml
 #
-# Deploy:
+# Deploy (first time — Talos not yet on disk):
+#   cd ansible
+#   1. Boot VPS into rescue mode (provider dashboard)
+#   2. ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-prod
+#   3. Switch VPS boot mode back to normal (provider dashboard)
+#   4. Reboot VPS (provider dashboard)
+#   5. Wait ~60s for Talos maintenance mode
+#   6. ansible-playbook vps-deploy.yml -e env=../environments/vps-prod
+#
+# Deploy (re-deploy — Talos already on disk, just re-bootstrap):
 #   cd ansible
 #   ansible-playbook vps-deploy.yml -e env=../environments/vps-prod
 #
@@ -41,17 +50,21 @@ vm_nameservers:
 # --- Nodes ---
 # All 3 nodes are combined controlplane + worker.
 # Each needs: name, ip (public IP)
-# For rescue mode install, also: rescue_ssh_host (same as ip usually), rescue_ssh_user (root)
+# For rescue mode install, also: rescue_ssh_host, rescue_ssh_user, rescue_ssh_pass
+# rescue_ssh_pass is needed when rescue mode uses password auth (e.g., OVH)
 controlplane_nodes:
   - name: node-0
     ip: REPLACE_WITH_VPS_0_PUBLIC_IP
     rescue_ssh_host: REPLACE_WITH_VPS_0_PUBLIC_IP
+    rescue_ssh_pass: REPLACE_OR_REMOVE
   - name: node-1
     ip: REPLACE_WITH_VPS_1_PUBLIC_IP
     rescue_ssh_host: REPLACE_WITH_VPS_1_PUBLIC_IP
+    rescue_ssh_pass: REPLACE_OR_REMOVE
   - name: node-2
     ip: REPLACE_WITH_VPS_2_PUBLIC_IP
     rescue_ssh_host: REPLACE_WITH_VPS_2_PUBLIC_IP
+    rescue_ssh_pass: REPLACE_OR_REMOVE
 
 # No dedicated workers — all nodes are combined CP+worker
 worker_nodes: []

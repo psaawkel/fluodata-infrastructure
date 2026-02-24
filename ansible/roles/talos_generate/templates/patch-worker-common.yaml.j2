@@ -1,8 +1,8 @@
-# Control plane common patch
+# Worker common patch
 # - Disable default CNI (we use Cilium)
 # - Disable kube-proxy (Cilium replaces it)
-# - etcd advertised subnets
 # - Kernel modules for Longhorn
+# - Worker node label
 # - Kubelet serving cert rotation
 # - Network sysctls
 cluster:
@@ -11,16 +11,6 @@ cluster:
       name: none
   proxy:
     disabled: true
-{% if etcd_advertised_subnets is defined %}
-  etcd:
-    advertisedSubnets:
-{% for subnet in etcd_advertised_subnets %}
-      - {{ subnet }}
-{% endfor %}
-{% endif %}
-{% if allow_scheduling_on_controlplanes | default(false) %}
-  allowSchedulingOnControlPlanes: true
-{% endif %}
 machine:
   kernel:
     modules:
@@ -29,6 +19,8 @@ machine:
   kubelet:
     extraArgs:
       rotate-server-certificates: "true"
+  nodeLabels:
+    node-role.kubernetes.io/worker: ""
   sysctls:
     net.core.somaxconn: "65535"
     net.core.netdev_max_backlog: "4096"

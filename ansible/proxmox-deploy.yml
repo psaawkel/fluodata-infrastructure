@@ -7,21 +7,23 @@
 #   ansible-playbook proxmox-deploy.yml -e env=../environments/proxmox-homelab
 # =============================================================================
 
-# --- Load config, validate, add Proxmox host ---
-- name: Load and validate Proxmox config
+# --- Load config, validate, generate Talos configs ---
+- name: Load config and generate Talos configs
   hosts: localhost
   gather_facts: false
-  tasks:
+  pre_tasks:
     - ansible.builtin.include_tasks: tasks/load-config.yml
     - ansible.builtin.include_tasks: tasks/validate-proxmox.yml
+  roles:
+    - talos_generate
 
-# --- Create VMs, bootstrap Talos, fix boot order, install Cilium ---
-- name: Deploy Talos cluster
+# --- Create VMs, apply configs, bootstrap, install Cilium ---
+- name: Deploy Talos cluster on Proxmox
   hosts: proxmox_hosts
   gather_facts: false
   roles:
     - proxmox_dnsmasq
     - proxmox_vms
-    - talos_bootstrap
+    - talos_bootstrap_proxmox
     - proxmox_post_install
     - cilium
