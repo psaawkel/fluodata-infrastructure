@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+# dnsmasq config for Talos VMs on {{ vm_bridge }}
+# Generated from: {{ env_dir }}/config.yml
+
+interface={{ vm_bridge }}
+bind-interfaces
+dhcp-range={{ dhcp_range_start }},{{ dhcp_range_end }},{{ dhcp_lease_time }}
+
+{% for node in all_nodes %}
+dhcp-host={{ node.mac }},{{ node.name }},{{ node.ip }}
+{% endfor %}

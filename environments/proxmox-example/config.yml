@@ -51,6 +51,12 @@ vm_nameservers:
 vm_storage: local-lvm
 talos_iso_storage: local
 
+# --- DHCP (dnsmasq) ---
+# Optional — these have sensible defaults. Only set if your network differs.
+# dhcp_range_start: 10.10.0.100
+# dhcp_range_end: 10.10.0.200
+# dhcp_lease_time: 12h
+
 # --- Nodes ---
 # Each node needs: name, vmid, ip, mac, cores, memory, boot_disk_gb
 # Workers can additionally have: longhorn_disk_gb
