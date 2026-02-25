@@ -11,7 +11,8 @@ spec:
   source:
     repoURL: git@github.com:psaawkel/fluodata-infrastructure.git
     targetRevision: opencode-opus
-    path: kubernetes/clusters/vps-ovh-test1/apps/scylla/operator/upstream/bundle/manifests
+    # use the deploy/operator path which contains plain CRD + runtime manifests
+    path: kubernetes/clusters/vps-ovh-test1/apps/scylla/operator/upstream/deploy/operator
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
