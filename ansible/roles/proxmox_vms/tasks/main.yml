@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# Role: proxmox_vms — Create Talos VMs on Proxmox
+#
+# Proxmox API modules run on localhost (REST API, not SSH).
+# ISO download runs on Proxmox host directly (to control filename).
+# =============================================================================
+
+# --- Download Talos ISO if not present ---
+- name: Check if Talos ISO exists on Proxmox
+  ansible.builtin.stat:
+    path: "/var/lib/vz/template/iso/{{ talos_iso_filename }}"
+  register: talos_iso_stat
+
+- name: Download Talos ISO to Proxmox
+  ansible.builtin.get_url:
+    url: "{{ talos_iso_url }}"
+    dest: "/var/lib/vz/template/iso/{{ talos_iso_filename }}"
+    mode: "0644"
+    timeout: 300
+  when: not talos_iso_stat.stat.exists
+
+# --- Create control plane VMs ---
+- name: Create control plane VMs
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ item.vmid }}"
+    name: "{{ item.name }}"
+    state: present
+    machine: q35
+    bios: seabios
+    ostype: l26
+    scsihw: virtio-scsi-single
+    cores: "{{ item.cores }}"
+    sockets: 1
+    cpu: x86-64-v2-AES
+    memory: "{{ item.memory }}"
+    balloon: 0
+    agent: "enabled=1"
+    net:
+      net0: "virtio={{ item.mac }},bridge={{ vm_bridge }},firewall=0"
+    scsi:
+      scsi0: "{{ vm_storage }}:{{ item.boot_disk_gb }},discard=on,iothread=1"
+    ide:
+      ide2: "{{ talos_iso_storage }}:iso/{{ talos_iso_filename }},media=cdrom"
+    boot: "order=ide2;scsi0"
+    serial:
+      serial0: socket
+    onboot: true
+    tags:
+      - talos
+      - controlplane
+      - ansible
+  loop: "{{ controlplane_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+
+# --- Create worker VMs ---
+- name: Create worker VMs
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ item.vmid }}"
+    name: "{{ item.name }}"
+    state: present
+    machine: q35
+    bios: seabios
+    ostype: l26
+    scsihw: virtio-scsi-single
+    cores: "{{ item.cores }}"
+    sockets: 1
+    cpu: x86-64-v2-AES
+    memory: "{{ item.memory }}"
+    balloon: 0
+    agent: "enabled=1"
+    net:
+      net0: "virtio={{ item.mac }},bridge={{ vm_bridge }},firewall=0"
+    scsi:
+      scsi0: "{{ vm_storage }}:{{ item.boot_disk_gb }},discard=on,iothread=1"
+      scsi1: "{{ vm_storage }}:{{ item.longhorn_disk_gb }},discard=on,iothread=1"
+    ide:
+      ide2: "{{ talos_iso_storage }}:iso/{{ talos_iso_filename }},media=cdrom"
+    boot: "order=ide2;scsi0"
+    serial:
+      serial0: socket
+    onboot: true
+    tags:
+      - talos
+      - worker
+      - ansible
+  loop: "{{ worker_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+
+# --- Start all VMs ---
+- name: Start control plane VMs
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ item.vmid }}"
+    state: started
+  loop: "{{ controlplane_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+
+- name: Start worker VMs
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ item.vmid }}"
+    state: started
+  loop: "{{ worker_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false

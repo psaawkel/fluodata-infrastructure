@@ -1,0 +1,76 @@
+# =============================================================================
+# VPS environment config — EXAMPLE
+#
+# Copy this folder and fill in your values:
+#   cd environments
+#   cp -r vps-example/ vps-prod/
+#   vim vps-prod/config.yml
+#
+# Deploy (first time — Talos not yet on disk):
+#   cd ansible
+#   1. Boot VPS into rescue mode (provider dashboard)
+#   2. ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-prod
+#      (auto-detects network settings + writes Talos to disk)
+#   3. Switch VPS boot mode back to normal (provider dashboard)
+#   4. Reboot VPS (provider dashboard)
+#   5. Wait ~60s for Talos maintenance mode
+#   6. ansible-playbook vps-deploy.yml -e env=../environments/vps-prod
+#
+# Apply config changes to running cluster:
+#   ansible-playbook vps-apply.yml -e env=../environments/vps-prod
+#
+# Destroy:
+#   ansible-playbook vps-destroy.yml -e env=../environments/vps-prod
+# =============================================================================
+
+# --- Platform ---
+# Must be "proxmox" or "vps". Controls which playbook to use.
+platform: vps
+
+# --- Talos ---
+talos_version: v1.12.4
+# Schematic ID from factory.talos.dev (includes extensions: iscsi-tools, util-linux-tools)
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
+
+# --- Cluster ---
+cluster_name: fluodata
+# No VIP on VPS — no shared L2 for gratuitous ARP.
+# cluster_vip is intentionally NOT set. API endpoint uses first CP node IP.
+
+# --- Nodes ---
+# Each node has a role:
+#   cp       — control plane only (NoSchedule taint, no workloads)
+#   worker   — worker only (no etcd, no control plane components)
+#   cpworker — combined control plane + worker (schedules workloads)
+#
+# Required per-node:
+#   name: unique node name
+#   role: cp | worker | cpworker
+#   host: hostname or IPv4 address to connect to (SSH, talosctl)
+#
+# Optional per-node:
+#   ip:           static IPv4 for Talos machine config (defaults to host if host is IPv4)
+#   gateway:      override detected gateway
+#   subnet_mask:  override detected subnet mask (24 or 32)
+#   nameservers:  override detected nameservers
+#   install_disk: override detected install disk
+#
+# Rescue mode credentials (for vps-deploy-rescue.yml):
+#   rescue_ssh_pass: password for rescue mode SSH (OVH provides this)
+#   rescue_ssh_user: SSH user (default: root)
+nodes:
+  - name: cp-0
+    role: cpworker
+    host: REPLACE_WITH_VPS_0_HOSTNAME_OR_IP
+    rescue_ssh_pass: REPLACE_OR_REMOVE
+  - name: cp-1
+    role: cpworker
+    host: REPLACE_WITH_VPS_1_HOSTNAME_OR_IP
+    rescue_ssh_pass: REPLACE_OR_REMOVE
+  - name: cp-2
+    role: cpworker
+    host: REPLACE_WITH_VPS_2_HOSTNAME_OR_IP
+    rescue_ssh_pass: REPLACE_OR_REMOVE
+
+# --- Cilium ---
+cilium_version: "1.17.3"

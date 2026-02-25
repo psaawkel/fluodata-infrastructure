@@ -1,0 +1,75 @@
+---
+# =============================================================================
+# Role: cilium — Install Cilium CNI via Helm
+#
+# Requires kubeconfig_path to be set by the preceding bootstrap role.
+# Runs on whatever host the playbook targets (Proxmox host or localhost).
+# =============================================================================
+
+- name: Add Cilium Helm repo
+  ansible.builtin.command:
+    cmd: helm repo add cilium https://helm.cilium.io/
+  register: helm_repo_result
+  changed_when: "'has been added' in helm_repo_result.stdout"
+  failed_when:
+    - helm_repo_result.rc != 0
+    - "'already exists' not in helm_repo_result.stderr"
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Update Helm repos
+  ansible.builtin.command:
+    cmd: helm repo update
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Compute total node count
+  ansible.builtin.set_fact:
+    _total_nodes: "{{ (controlplane_nodes | length) + (worker_nodes | default([]) | length) }}"
+
+- name: Install Cilium via Helm
+  ansible.builtin.command:
+    cmd: >-
+      helm upgrade --install cilium cilium/cilium
+        --namespace kube-system
+        --version {{ cilium_version }}
+        --set ipam.mode=kubernetes
+        --set kubeProxyReplacement=true
+        --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}"
+        --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}"
+        --set cgroup.autoMount.enabled=false
+        --set cgroup.hostRoot=/sys/fs/cgroup
+        --set k8sServiceHost=localhost
+        --set k8sServicePort=7445
+        --set operator.replicas={{ [_total_nodes | int, 2] | min }}
+        --wait
+        --timeout 5m
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: cilium_result
+  changed_when: "'STATUS: deployed' in cilium_result.stdout"
+
+- name: Wait for all nodes to be Ready
+  ansible.builtin.command:
+    cmd: >-
+      kubectl get nodes
+        -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: nodes_ready
+  until: >-
+    nodes_ready.stdout_lines | select('equalto', 'True') | list | length
+    == (controlplane_nodes | length + (worker_nodes | default([]) | length))
+  retries: 30
+  delay: 10
+
+- name: Show cluster status
+  ansible.builtin.command:
+    cmd: kubectl get nodes -o wide
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: cluster_status
+
+- name: Display cluster status
+  ansible.builtin.debug:
+    msg: "{{ cluster_status.stdout_lines }}"

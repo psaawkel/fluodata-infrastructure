@@ -1,0 +1,5 @@
+---
+argocd_chart_version: "9.4.4"
+argocd_namespace: argocd
+age_key_file: "~/.config/sops/age/keys.txt"
+argocd_deploy_key_file: "~/.ssh/argocd-deploy-key"

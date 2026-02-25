@@ -1,0 +1,53 @@
+---
+# tasks/load-config.yml — Load and validate environment config (common)
+#
+# Required variable: env (path to environment folder, passed via -e)
+# Sets: env_dir (absolute path), plus all variables from config.yml
+
+- name: Fail if env is not specified
+  ansible.builtin.fail:
+    msg: "Specify environment folder: -e env=../environments/<name>"
+  when: env is not defined
+
+- name: Resolve env_dir to absolute path
+  ansible.builtin.set_fact:
+    env_dir: "{{ (playbook_dir ~ '/' ~ env) | realpath }}"
+
+- name: Check config.yml exists
+  ansible.builtin.stat:
+    path: "{{ env_dir }}/config.yml"
+  register: _config_stat
+
+- name: Fail if config.yml not found
+  ansible.builtin.fail:
+    msg: "config.yml not found in {{ env_dir }}"
+  when: not _config_stat.stat.exists
+
+- name: Check if config.yml is SOPS-encrypted
+  ansible.builtin.command:
+    cmd: grep -q "^sops:" "{{ env_dir }}/config.yml"
+  register: _sops_check
+  changed_when: false
+  failed_when: false
+
+- name: Load config.yml (SOPS-encrypted)
+  when: _sops_check.rc == 0
+  block:
+    - name: Decrypt config.yml with SOPS
+      ansible.builtin.command:
+        cmd: sops --decrypt "{{ env_dir }}/config.yml"
+      register: _sops_decrypted
+      changed_when: false
+      no_log: true
+
+    - name: Parse decrypted config
+      ansible.builtin.set_fact: "{{ item.key }}={{ item.value }}"
+      loop: "{{ _sops_decrypted.stdout | from_yaml | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: true
+
+- name: Load config.yml (plaintext)
+  ansible.builtin.include_vars:
+    file: "{{ env_dir }}/config.yml"
+  when: _sops_check.rc != 0

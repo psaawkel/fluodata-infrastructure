@@ -1,0 +1,115 @@
+---
+# =============================================================================
+# Role: talos_generate — Generate Talos secrets, patches, and machine configs
+#
+# Runs on localhost. Writes all files to env_dir.
+# No network access needed — pure local generation.
+# Idempotent: secrets generated once and reused, configs regenerated with --force.
+#
+# Required variables:
+#   - env_dir, cluster_name, cluster_endpoint, talos_version
+#   - talos_schematic_id, talos_install_image
+#   - controlplane_nodes, worker_nodes, all_nodes
+#   - cilium_version
+#
+# Per-node network settings resolved from (in priority order):
+#   1. Config.yml per-node values (e.g., node.gateway)
+#   2. Auto-detected facts from node-facts-<name>.yml (created by vps_detect)
+#   3. Global config.yml values (vm_gateway, vm_subnet_mask, etc.) — Proxmox compat
+#
+# Optional: cluster_vip, etcd_advertised_subnets
+# =============================================================================
+
+# --- Create env directory ---
+- name: Create env directory
+  ansible.builtin.file:
+    path: "{{ env_dir }}"
+    state: directory
+    mode: "0700"
+
+# =============================================================================
+# Secrets generation (idempotent — generated once, reused across deploys)
+# =============================================================================
+- name: Check if secrets exist
+  ansible.builtin.stat:
+    path: "{{ env_dir }}/secrets.yaml"
+  register: _secrets_stat
+
+- name: Generate Talos secrets
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen secrets
+        --output-file {{ env_dir }}/secrets.yaml
+        --talos-version {{ talos_version }}
+  when: not _secrets_stat.stat.exists
+
+# =============================================================================
+# Generate config patches from templates
+# =============================================================================
+- name: Generate control plane common patch
+  ansible.builtin.template:
+    src: patch-cp-common.yaml.j2
+    dest: "{{ env_dir }}/patch-cp-common.yaml"
+    mode: "0600"
+
+- name: Generate worker common patch
+  ansible.builtin.template:
+    src: patch-worker-common.yaml.j2
+    dest: "{{ env_dir }}/patch-worker-common.yaml"
+    mode: "0600"
+
+- name: Generate per-node patches
+  ansible.builtin.include_tasks: generate-node-patch.yml
+  loop: "{{ all_nodes }}"
+  loop_control:
+    loop_var: _node
+    label: "{{ _node.name }}"
+
+# =============================================================================
+# Generate Talos configs from secrets + patches
+# =============================================================================
+- name: Generate control plane config
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
+        --with-secrets {{ env_dir }}/secrets.yaml
+        --config-patch @{{ env_dir }}/patch-cp-common.yaml
+        --output {{ env_dir }}/controlplane.yaml
+        --output-types controlplane
+        --talos-version {{ talos_version }}
+        --force
+
+- name: Generate worker config
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
+        --with-secrets {{ env_dir }}/secrets.yaml
+        --config-patch @{{ env_dir }}/patch-worker-common.yaml
+        --output {{ env_dir }}/worker.yaml
+        --output-types worker
+        --talos-version {{ talos_version }}
+        --force
+  when: (worker_nodes | default([])) | length > 0
+
+- name: Generate talosconfig
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
+        --with-secrets {{ env_dir }}/secrets.yaml
+        --output {{ env_dir }}/talosconfig
+        --output-types talosconfig
+        --talos-version {{ talos_version }}
+        --force
+
+# Fix empty endpoints in generated talosconfig
+- name: Set talosconfig endpoint
+  ansible.builtin.command:
+    cmd: >-
+      talosctl --talosconfig {{ env_dir }}/talosconfig
+        config endpoint {{ cluster_vip | default(controlplane_nodes[0].host) }}
+
+- name: Set talosconfig default nodes
+  ansible.builtin.command:
+    cmd: >-
+      talosctl --talosconfig {{ env_dir }}/talosconfig
+        config nodes {{ controlplane_nodes | map(attribute='host') | join(' ') }}

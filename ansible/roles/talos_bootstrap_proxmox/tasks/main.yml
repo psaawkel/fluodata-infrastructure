@@ -1,0 +1,193 @@
+---
+# =============================================================================
+# Role: talos_bootstrap_proxmox — Apply configs, bootstrap, kubeconfig
+#
+# Runs on Proxmox host (has network access to VMs on vmbr1).
+# Configs were generated locally by talos_generate → env_dir.
+# This role copies them to Proxmox, runs talosctl there, fetches results back.
+#
+# Required variables:
+#   - env_dir, cluster_name, cluster_endpoint, talos_version
+#   - controlplane_nodes, worker_nodes, all_nodes
+#   - cluster_vip (optional)
+# =============================================================================
+
+# --- Set up remote work directory ---
+- name: Set remote work directory
+  ansible.builtin.set_fact:
+    _remote_dir: "/tmp/talos-deploy/{{ env_dir | basename }}"
+
+- name: Create remote work directory
+  ansible.builtin.file:
+    path: "{{ _remote_dir }}"
+    state: directory
+    mode: "0700"
+
+# --- Copy generated configs from local env_dir to Proxmox host ---
+- name: Copy core configs to Proxmox host
+  ansible.builtin.copy:
+    src: "{{ env_dir }}/{{ item }}"
+    dest: "{{ _remote_dir }}/{{ item }}"
+    mode: "0600"
+  loop:
+    - secrets.yaml
+    - controlplane.yaml
+    - talosconfig
+
+- name: Copy worker config to Proxmox host
+  ansible.builtin.copy:
+    src: "{{ env_dir }}/worker.yaml"
+    dest: "{{ _remote_dir }}/worker.yaml"
+    mode: "0600"
+  when: (worker_nodes | default([])) | length > 0
+
+- name: Copy per-node patches to Proxmox host
+  ansible.builtin.copy:
+    src: "{{ env_dir }}/patch-{{ item.name }}.yaml"
+    dest: "{{ _remote_dir }}/patch-{{ item.name }}.yaml"
+    mode: "0600"
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# =============================================================================
+# Wait for Talos API, detect mode, apply configs
+# =============================================================================
+- name: Wait for Talos API on all nodes (port 50000)
+  ansible.builtin.wait_for:
+    host: "{{ item.host }}"
+    port: 50000
+    timeout: 300
+    delay: 10
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Check if node is already configured (authenticated talosctl works)
+- name: Check if first CP node is already configured
+  ansible.builtin.command:
+    cmd: >-
+      talosctl version
+        --talosconfig {{ _remote_dir }}/talosconfig
+        --nodes {{ controlplane_nodes[0].host }}
+        --endpoints {{ controlplane_nodes[0].host }}
+  register: _node_configured_check
+  failed_when: false
+  changed_when: false
+
+- name: Set node configuration state
+  ansible.builtin.set_fact:
+    _nodes_in_maintenance: "{{ _node_configured_check.rc != 0 }}"
+
+# --- Maintenance mode path (first-time apply with --insecure) ---
+- name: Apply config to control plane nodes (maintenance mode)
+  ansible.builtin.command:
+    cmd: >-
+      talosctl apply-config
+        --insecure
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
+        --config-patch @{{ _remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ _remote_dir }}/controlplane.yaml
+  loop: "{{ controlplane_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _nodes_in_maintenance
+
+- name: Apply config to worker nodes (maintenance mode)
+  ansible.builtin.command:
+    cmd: >-
+      talosctl apply-config
+        --insecure
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
+        --config-patch @{{ _remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ _remote_dir }}/worker.yaml
+  loop: "{{ worker_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _nodes_in_maintenance and (worker_nodes | default([])) | length > 0
+
+# --- Already-configured path (re-apply with auth) ---
+- name: Apply config to control plane nodes (authenticated)
+  ansible.builtin.command:
+    cmd: >-
+      talosctl apply-config
+        --talosconfig {{ _remote_dir }}/talosconfig
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
+        --config-patch @{{ _remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ _remote_dir }}/controlplane.yaml
+  loop: "{{ controlplane_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not _nodes_in_maintenance
+
+- name: Apply config to worker nodes (authenticated)
+  ansible.builtin.command:
+    cmd: >-
+      talosctl apply-config
+        --talosconfig {{ _remote_dir }}/talosconfig
+        --nodes {{ item.host }}
+        --endpoints {{ item.host }}
+        --config-patch @{{ _remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ _remote_dir }}/worker.yaml
+  loop: "{{ worker_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not _nodes_in_maintenance and (worker_nodes | default([])) | length > 0
+
+# =============================================================================
+# Wait for Talos API (after potential reboot from maintenance), bootstrap
+# =============================================================================
+- name: Wait for nodes to boot and Talos API to be ready
+  ansible.builtin.wait_for:
+    host: "{{ item.host }}"
+    port: 50000
+    timeout: 300
+    delay: "{{ 30 if _nodes_in_maintenance else 5 }}"
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Bootstrap etcd on first control plane
+  ansible.builtin.command:
+    cmd: >-
+      talosctl bootstrap
+        --talosconfig {{ _remote_dir }}/talosconfig
+        --nodes {{ controlplane_nodes[0].host }}
+        --endpoints {{ controlplane_nodes[0].host }}
+  register: bootstrap_result
+  failed_when:
+    - bootstrap_result.rc != 0
+    - "'AlreadyExists' not in bootstrap_result.stderr"
+
+- name: Wait for Kubernetes API (port 6443)
+  ansible.builtin.wait_for:
+    host: "{{ cluster_vip | default(controlplane_nodes[0].host) }}"
+    port: 6443
+    timeout: 300
+    delay: 15
+
+- name: Generate kubeconfig
+  ansible.builtin.command:
+    cmd: >-
+      talosctl kubeconfig {{ _remote_dir }}/kubeconfig
+        --talosconfig {{ _remote_dir }}/talosconfig
+        --nodes {{ controlplane_nodes[0].host }}
+        --endpoints {{ cluster_vip | default(controlplane_nodes[0].host) }}
+        --force
+
+# =============================================================================
+# Fetch kubeconfig back to local env_dir
+# =============================================================================
+- name: Fetch kubeconfig to env dir
+  ansible.builtin.fetch:
+    src: "{{ _remote_dir }}/kubeconfig"
+    dest: "{{ env_dir }}/kubeconfig"
+    flat: true
+
+# Set kubeconfig_path for cilium role (runs next on same host)
+- name: Set kubeconfig path for subsequent roles
+  ansible.builtin.set_fact:
+    kubeconfig_path: "{{ _remote_dir }}/kubeconfig"

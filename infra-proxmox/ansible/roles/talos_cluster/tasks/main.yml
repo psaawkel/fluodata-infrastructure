@@ -1,0 +1,239 @@
+---
+# =============================================================================
+# Role: talos_cluster — Generate configs, apply, bootstrap, fetch kubeconfig
+#
+# All talosctl commands run on the Proxmox host (VMs on internal vmbr1).
+# Secrets are generated once and reused across deploys.
+# NO machine.network.hostname in patches — dnsmasq handles it via DHCP.
+# =============================================================================
+
+# --- Create work directory on Proxmox ---
+- name: Create remote work directory
+  ansible.builtin.file:
+    path: "{{ talos_remote_dir }}"
+    state: directory
+    mode: "0700"
+
+# --- Create local talos directory ---
+- name: Create local talos directory
+  ansible.builtin.file:
+    path: "{{ talos_local_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+# --- Generate secrets (once, reusable) ---
+# Check both local and remote — secrets may exist in either location.
+- name: Check if secrets exist locally
+  ansible.builtin.stat:
+    path: "{{ talos_local_dir }}/secrets.yaml"
+  register: secrets_local_stat
+  delegate_to: localhost
+  become: false
+
+- name: Check if secrets exist on Proxmox
+  ansible.builtin.stat:
+    path: "{{ talos_remote_dir }}/secrets.yaml"
+  register: secrets_remote_stat
+
+- name: Generate Talos secrets on Proxmox
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen secrets
+        --output-file {{ talos_remote_dir }}/secrets.yaml
+        --talos-version {{ talos_version }}
+  when: not secrets_local_stat.stat.exists and not secrets_remote_stat.stat.exists
+
+- name: Fetch secrets to local (from newly generated or pre-existing remote)
+  ansible.builtin.fetch:
+    src: "{{ talos_remote_dir }}/secrets.yaml"
+    dest: "{{ talos_local_dir }}/secrets.yaml"
+    flat: true
+  when: not secrets_local_stat.stat.exists
+
+- name: Copy secrets to Proxmox (if already existed locally)
+  ansible.builtin.copy:
+    src: "{{ talos_local_dir }}/secrets.yaml"
+    dest: "{{ talos_remote_dir }}/secrets.yaml"
+    mode: "0600"
+  when: secrets_local_stat.stat.exists
+
+# --- Generate config patches from templates ---
+- name: Generate control plane common patch
+  ansible.builtin.template:
+    src: patch-cp-common.yaml.j2
+    dest: "{{ talos_remote_dir }}/patch-cp-common.yaml"
+    mode: "0600"
+
+- name: Generate worker common patch
+  ansible.builtin.template:
+    src: patch-worker-common.yaml.j2
+    dest: "{{ talos_remote_dir }}/patch-worker-common.yaml"
+    mode: "0600"
+
+- name: Generate per-node patches
+  ansible.builtin.template:
+    src: patch-node.yaml.j2
+    dest: "{{ talos_remote_dir }}/patch-{{ item.name }}.yaml"
+    mode: "0600"
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# --- Generate Talos configs from secrets + patches ---
+- name: Generate control plane config
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
+        --with-secrets {{ talos_remote_dir }}/secrets.yaml
+        --config-patch @{{ talos_remote_dir }}/patch-cp-common.yaml
+        --output {{ talos_remote_dir }}/controlplane.yaml
+        --output-types controlplane
+        --talos-version {{ talos_version }}
+        --force
+
+- name: Generate worker config
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
+        --with-secrets {{ talos_remote_dir }}/secrets.yaml
+        --config-patch @{{ talos_remote_dir }}/patch-worker-common.yaml
+        --output {{ talos_remote_dir }}/worker.yaml
+        --output-types worker
+        --talos-version {{ talos_version }}
+        --force
+
+- name: Generate talosconfig
+  ansible.builtin.command:
+    cmd: >-
+      talosctl gen config {{ cluster_name }} {{ cluster_endpoint }}
+        --with-secrets {{ talos_remote_dir }}/secrets.yaml
+        --output {{ talos_remote_dir }}/talosconfig
+        --output-types talosconfig
+        --talos-version {{ talos_version }}
+        --force
+
+# talosctl gen config produces talosconfig with empty endpoints.
+# Set endpoint to VIP (or first CP) so talosctl works without -e after deploy.
+# During setup, bootstrap/apply commands specify --endpoints explicitly.
+- name: Set talosconfig endpoint
+  ansible.builtin.command:
+    cmd: >-
+      talosctl --talosconfig {{ talos_remote_dir }}/talosconfig
+        config endpoint {{ cluster_vip | default(controlplane_nodes[0].ip) }}
+
+- name: Set talosconfig default nodes
+  ansible.builtin.command:
+    cmd: >-
+      talosctl --talosconfig {{ talos_remote_dir }}/talosconfig
+        config nodes {{ controlplane_nodes | map(attribute='ip') | join(' ') }}
+
+# --- Wait for VMs to reach Talos maintenance mode ---
+- name: Wait for Talos API on all nodes (port 50000)
+  ansible.builtin.wait_for:
+    host: "{{ item.ip }}"
+    port: 50000
+    timeout: 300
+    delay: 10
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# --- Apply configs to each node ---
+- name: Apply config to control plane nodes
+  ansible.builtin.command:
+    cmd: >-
+      talosctl apply-config
+        --insecure
+        --nodes {{ item.ip }}
+        --endpoints {{ item.ip }}
+        --config-patch @{{ talos_remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ talos_remote_dir }}/controlplane.yaml
+  loop: "{{ controlplane_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Apply config to worker nodes
+  ansible.builtin.command:
+    cmd: >-
+      talosctl apply-config
+        --insecure
+        --nodes {{ item.ip }}
+        --endpoints {{ item.ip }}
+        --config-patch @{{ talos_remote_dir }}/patch-{{ item.name }}.yaml
+        --file {{ talos_remote_dir }}/worker.yaml
+  loop: "{{ worker_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# --- Wait for nodes to reboot after config apply ---
+- name: Wait for nodes to reboot and Talos API to come back
+  ansible.builtin.wait_for:
+    host: "{{ item.ip }}"
+    port: 50000
+    timeout: 300
+    delay: 30
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# --- Switch boot order to disk-first and detach ISO ---
+# After Talos installs to disk, the ISO must not be first in boot order.
+# If the host suspends/resumes, VMs reboot — booting from ISO again causes
+# "halt_if_installed" and the cluster won't come back up.
+- name: Switch boot order to disk-first and detach ISO
+  ansible.builtin.command:
+    cmd: >-
+      qm set {{ item.vmid }}
+        --boot order=scsi0
+        --ide2 none,media=cdrom
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# --- Bootstrap the cluster ---
+- name: Bootstrap etcd on first control plane
+  ansible.builtin.command:
+    cmd: >-
+      talosctl bootstrap
+        --talosconfig {{ talos_remote_dir }}/talosconfig
+        --nodes {{ controlplane_nodes[0].ip }}
+        --endpoints {{ controlplane_nodes[0].ip }}
+  register: bootstrap_result
+  # Bootstrap fails if already bootstrapped — that's OK (idempotent)
+  failed_when:
+    - bootstrap_result.rc != 0
+    - "'AlreadyExists' not in bootstrap_result.stderr"
+
+# --- Wait for Kubernetes API ---
+# With VIP, wait on the VIP address; without VIP, fall back to first CP node
+- name: Wait for Kubernetes API (port 6443)
+  ansible.builtin.wait_for:
+    host: "{{ cluster_vip | default(controlplane_nodes[0].ip) }}"
+    port: 6443
+    timeout: 300
+    delay: 15
+
+# --- Fetch kubeconfig ---
+# Use VIP for endpoints so kubeconfig works regardless of which CP node is up
+- name: Generate kubeconfig
+  ansible.builtin.command:
+    cmd: >-
+      talosctl kubeconfig {{ talos_remote_dir }}/kubeconfig
+        --talosconfig {{ talos_remote_dir }}/talosconfig
+        --nodes {{ controlplane_nodes[0].ip }}
+        --endpoints {{ cluster_vip | default(controlplane_nodes[0].ip) }}
+        --force
+
+- name: Fetch kubeconfig to local
+  ansible.builtin.fetch:
+    src: "{{ talos_remote_dir }}/kubeconfig"
+    dest: "{{ talos_local_dir }}/kubeconfig"
+    flat: true
+
+- name: Fetch talosconfig to local
+  ansible.builtin.fetch:
+    src: "{{ talos_remote_dir }}/talosconfig"
+    dest: "{{ talos_local_dir }}/talosconfig"
+    flat: true

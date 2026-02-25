@@ -1,38 +1,41 @@
-# Terraform
-.terraform/
-.terraform.lock.hcl
+# Terraform (legacy, archived)
+**/.terraform/
 *.tfstate
 *.tfstate.backup
+*.tfstate.*.backup
+*.tfplan
 crash.log
+crash.*.log
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-.terraformrc
-terraform.rc
-terraform.tfvars
-tfplan
+**/terraform.tfvars
 
-# Talos generated configs
-infra-proxmox/talos/generated/
-infra-proxmox/talos/secrets.yaml
-infra-proxmox/terraform/talosconfig
+# Ansible
+*.retry
 
-# Kubeconfig
-kubeconfig
-*.kubeconfig
+# Sensitive cluster files (may appear in various locations)
+**/kubeconfig
+**/talosconfig
+**/secrets.yaml
 
-# SOPS age keys (never commit private keys)
+# Environment folders — generated/runtime files are gitignored.
+# config.yml and node-facts-*.yml are SOPS-encrypted and safe to commit.
+environments/*/controlplane.yaml
+environments/*/worker.yaml
+environments/*/patch-*.yaml
+environments/*/*.txt
+environments/*/kubelet-serving-cert-approver.yaml
+environments/*/argocd-root-app.yaml
+environments/*/.*
+
+# Example environments (always committed, never encrypted)
+# Real environments: config.yml is SOPS-encrypted, committed to git.
+
+# Age private key — NEVER commit this
 *.agekey
-age.key
-.secrets/
-
-# Editor
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+keys.txt
 
 # OS
 .DS_Store

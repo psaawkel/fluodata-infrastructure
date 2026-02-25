@@ -1,0 +1,57 @@
+# =============================================================================
+# VPS OVH test — Single-node Talos cluster
+#
+# Rescue install:
+#   cd ansible
+#   ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-ovh-test
+#   # Then: OVH dashboard → exit rescue mode → reboot
+#
+# Deploy:
+#   cd ansible
+#   ansible-playbook vps-deploy.yml -e env=../environments/vps-ovh-test
+# =============================================================================
+platform: vps
+# --- Talos ---
+talos_version: v1.12.4
+# Same schematic as proxmox (iscsi-tools, util-linux-tools, qemu-guest-agent)
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
+talos_install_disk: /dev/sdb
+# --- Cluster ---
+cluster_name: fluodata-test
+# --- Network ---
+# OVH /32 point-to-point routing
+vm_gateway: 57.128.254.1
+vm_subnet_mask: 32
+vm_nameservers:
+    - 213.186.33.99
+    - 1.1.1.1
+# --- Nodes ---
+controlplane_nodes:
+    - name: node-0
+      ip: 57.128.255.64
+      rescue_ssh_host: vps-23b688ea.vps.ovh.net
+      rescue_ssh_user: root
+      rescue_ssh_pass: ENC[AES256_GCM,data:ta+hyL3yXVIWtnZL,iv:yABDisU8trdmg8sQp5S5uZF5rwW39h7JGwao688ebnU=,tag:5aV/Cka9DD+WCvxQkdE3rw==,type:str]
+worker_nodes: []
+# --- Cilium ---
+cilium_version: 1.17.3
+sops:
+    kms: []
+    gcp_kms: []
+    azure_kv: []
+    hc_vault: []
+    age:
+        - recipient: age10xapwe62eqng7dhf4evrj3kswd7xqfna5t3lku7hz2gghy2j0etqsspzr5
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA2dzcxYXErbER3Z0I1OGJr
+            RVQraVRRWjAzLzlwK2ROOTRSSzRqTG0zWURJCkpkZzVOci9VejI1TmdWQkVHd1J5
+            dWhjeDFCN0tkbThNUk1mV0hIbjRaUG8KLS0tIFNxcHRKbk1ianMwQUVYUXBuRzF4
+            WkN5QXVhRTZnY3Qydk1aVFdnVm9RRDAKPyMIIw5IXT0dz90tPLdLTwGCS9oW9Bwv
+            GTlbuohPAITMqJhWTrtNJid0DzXooL/M3fbGmxjYve9sIPnizFiNAw==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-02-25T08:39:09Z"
+    mac: ENC[AES256_GCM,data:ZKT0SDP7/aYiW3F1M/p1vxYjSjLB8nVUnBP9yq2YjTDdF6fnUBeZhOLFcYs8CZOUlIGfPsgCBqcVeRIlTR7SyGLKko5cML62qdOC9ppJv1HGCNStngOo2Mkng21f2+PEEYm+Ikywh5/hzlHqL9DPZfBwQYuaNVKdW9TpcBIcEjA=,iv:Sozv/UIVF3WbUiq7uOY+NizusYPZ1f/ZFAP8ytEHklc=,tag:hG9pLEzVixFDaBf8jO8jIg==,type:str]
+    pgp: []
+    encrypted_regex: (rescue_ssh_pass|password|_secret$)
+    version: 3.9.4

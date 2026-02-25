@@ -32,15 +32,39 @@ These are hard-won lessons — every item below was discovered through actual de
 ### Cilium as CNI
 
 - Talos default CNI is Flannel. To use Cilium, must disable default CNI in Talos machine config.
-- Cilium must be running BEFORE any pods can schedule (chicken-and-egg with Argo CD).
-- Approach: embed Cilium manifests in Talos inline manifests, Argo CD takes over management later.
-- Talos machine config: set `cluster.network.cni.name: none` and provide Cilium via `cluster.inlineManifests`.
+- Talos machine config: set `cluster.network.cni.name: none`.
+- **Post-bootstrap Helm install works perfectly** (preferred over inline manifests):
+  - After `talosctl bootstrap`, K8s API is reachable even though nodes are `NotReady` (no CNI yet).
+  - `helm upgrade --install cilium` succeeds immediately post-bootstrap.
+  - Nodes become `Ready` ~2 minutes after Cilium deploys.
+  - Much simpler than the 1600-line inline manifest approach — clean, maintainable, upgradeable.
+- Old approach (inline manifests) is NOT recommended — hard to maintain and upgrade.
 
 ### DHCP and networking
 
 - Talos nocloud VMs do NOT send DHCP hostnames.
 - dnsmasq hostname-based reservations fail silently — VMs get random IPs.
 - Fix: assign deterministic MAC addresses to VMs and use MAC-based DHCP leases.
+- **Hostname conflict (Talos v1.12.4)**: When dnsmasq sends a hostname via DHCP, `talosctl apply-config` rejects configs containing `machine.network.hostname`. Omit hostname from config patches entirely; let dnsmasq handle it.
+
+### Virtual IP (VIP) for control plane
+
+- Talos has built-in VIP support — no external load balancer needed.
+- Config: `machine.network.interfaces[].vip.ip` on control plane nodes only.
+- Talos handles leader election internally; VIP is assigned to one CP node at a time using gratuitous ARP.
+- **CRITICAL: `interface: eth0` does NOT work with VIP**. Talos maps `eth0` to the physical interface (e.g., `ens18`) for address assignment, but the VIP operator looks for link `eth0` which never comes up as a physical link. VIP silently fails to activate.
+- **Fix: Use `deviceSelector: { physical: true }` instead of `interface: eth0`**. This resolves to the actual physical interface name and the VIP operator gets the correct link.
+- VIP address should be on the same subnet as node IPs but outside DHCP range and outside node IP range.
+- VIP only activates after etcd is healthy and the K8s API server is running.
+- `guestAgent` is NOT a valid Talos `machine.features` field — it's a Proxmox VM setting. Including it in Talos config patches causes `talosctl gen config` to fail with "unknown keys".
+
+### Factory installer image for extensions (CRITICAL)
+
+- The factory ISO boots with extensions from the schematic, but when Talos installs to disk, `machine.install.image` defaults to stock `ghcr.io/siderolabs/installer` which has NO extensions.
+- **Fix**: Set `machine.install.image: factory.talos.dev/installer/<schematic_id>:<version>` in per-node config patches.
+- **Verified working**: All 3 nodes show extensions loaded after deploy with factory installer image:
+  - `iscsi-tools` v0.2.0, `util-linux-tools` 2.41.2, `qemu-guest-agent` 10.2.0
+  - `qm agent <vmid> ping` succeeds on all 3 VMs (guest agent communicating with Proxmox).
 
 ### Deprecated fields (Talos 1.9.2+)
 
@@ -144,6 +168,59 @@ These scrapers must be disabled — Talos doesn't expose their metrics endpoints
 - Port forwarding via iptables rules on Proxmox host.
 - dnsmasq for DHCP on internal bridge.
 
+### Stale lock files
+
+- If Terraform/Ansible/API tasks die mid-operation, lock files at `/var/lock/qemu-server/lock-<vmid>.conf` must be manually removed before VMs can be destroyed or modified.
+
+### Boot order: ISO vs disk (CRITICAL)
+
+- VMs must boot from ISO (`order=ide2;scsi0`) for initial Talos install, but **after Talos installs to disk**, boot order must switch to disk-first (`order=scsi0`) and the ISO should be detached.
+- If the ISO stays first in boot order and the host suspends/resumes (or VMs reboot for any reason), Talos boots from ISO again and halts with: `"Talos already installed to disk but booted from another media and talos.halt_if_installed kernel parameter is set"`.
+- The cluster will NOT come back up until boot order is fixed and VMs are force-stopped + restarted.
+- **Fix**: After Talos applies config and reboots to disk, run `qm set <vmid> --boot order=scsi0 --ide2 none,media=cdrom` on each VM.
+- Ansible automation: add this as a post-install step in the `talos_cluster` role, after waiting for nodes to reboot.
+
+---
+
+## Ansible (Infrastructure as Code)
+
+### Why Ansible over Terraform
+
+- Terraform `stop_on_destroy` with Talos VMs is dangerously slow — ACPI shutdown doesn't work well. VMs take 5+ minutes, Terraform locks get stuck.
+- Ansible's `force: true` on stop + `purge: true` on destroy is much cleaner and faster.
+- Ansible handles imperative steps (talosctl, helm) naturally as shell tasks. Terraform required ugly `null_resource` + `local-exec` workarounds.
+- Full deploy: ~5 minutes from `ansible-playbook site.yml` to all nodes Ready with Cilium.
+
+### Proxmox API modules (delegate_to: localhost)
+
+- `community.proxmox.proxmox_kvm` and `proxmox_template` use REST API, not SSH.
+- They require `proxmoxer` Python library on the machine executing them.
+- Must use `delegate_to: localhost` because `proxmoxer` is installed locally (via `pipx inject` into ansible-core venv), not on the Proxmox host.
+- All `talosctl`/`kubectl`/`helm` commands run on the Proxmox host via SSH (VMs on internal vmbr1 network, not reachable from laptop).
+
+### ISO download filename mismatch
+
+- `community.proxmox.proxmox_template` with `content_type: iso` and `url:` downloads ISOs using the URL's filename (e.g., `nocloud-amd64.iso`), not a custom name.
+- Fix: use `ansible.builtin.get_url` on the Proxmox host directly to control the destination filename.
+
+### Ansible installation (pipx)
+
+- `pipx install ansible-core` then `pipx inject ansible-core proxmoxer requests requests-toolbelt`.
+- Collection: `community.proxmox:1.5.0` via `ansible-galaxy collection install`.
+- `stdout_callback = yaml` requires `community.general` — use `default` callback to avoid the dependency.
+
+### Secrets handling
+
+- `secrets.yaml` is generated once via `talosctl gen secrets` and reused across deploys (idempotent — skipped if exists).
+- Talos configs are regenerated from secrets + patches every run (idempotent — same secrets produce same certs).
+- Must check both local AND remote for existing secrets — they may exist on Proxmox from a prior run but not locally.
+
+### talosconfig empty endpoints
+
+- `talosctl gen config` produces a talosconfig with `endpoints: []` — talosctl commands fail with "failed to determine endpoints" unless `-e` is specified every time.
+- Fix: after generating talosconfig, run `talosctl config endpoint <VIP_or_CP_IP>` and `talosctl config nodes <CP_IPs>` to set defaults.
+- During Ansible deploy, bootstrap/apply commands specify `--endpoints` explicitly, so the empty endpoints only affect post-deploy usage.
+
 ---
 
 ## Resource Sizing (validated for ~5k IoT devices)
@@ -152,8 +229,10 @@ These scrapers must be disabled — Talos doesn't expose their metrics endpoints
 
 | Node   | vCPU | RAM  | Boot disk | Longhorn disk |
 | ------ | ---- | ---- | --------- | ------------- |
-| CP     | 2    | 6 GB | 20 GB     | -             |
-| Worker | 4    | 8 GB | 20 GB     | 80 GB         |
+| CP     | 2    | 4 GB | 20 GB     | -             |
+| Worker | 4    | 8 GB | 20 GB     | 20 GB (test)  |
+
+Production target: Worker Longhorn disk 80 GB.
 
 ### Application sizing
 
@@ -177,3 +256,12 @@ These scrapers must be disabled — Talos doesn't expose their metrics endpoints
 ## Cluster resilience
 
 - Cluster survived host hibernation/resume without issues — all pods recovered automatically.
+
+---
+
+## Deployment timing
+
+- Full deploy (`ansible-playbook site.yml`): ~5 minutes to all 3 nodes Ready with Cilium running.
+- ~31 Ansible tasks, ~17 changed on fresh deploy.
+- Cilium install to all nodes Ready: ~2 minutes.
+- Talos v1.12.4, Kubernetes v1.35.0, Cilium v1.17.3.

@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# Role: kubelet_cert_approver — Deploy kubelet-serving-cert-approver
+#
+# Auto-approves kubelet serving certificate CSRs (kubernetes.io/kubelet-serving
+# signer). Without this, kubelet port 10250 gets TLS errors because the CSRs
+# for serving certs stay Pending indefinitely.
+#
+# Requires kubeconfig_path to be set by the preceding bootstrap role.
+# Works on both localhost (VPS) and remote hosts (Proxmox) by copying the
+# manifest to the same directory as kubeconfig_path.
+# =============================================================================
+
+- name: Copy cert-approver manifest to work directory
+  ansible.builtin.copy:
+    src: kubelet-serving-cert-approver.yaml
+    dest: "{{ kubeconfig_path | dirname }}/kubelet-serving-cert-approver.yaml"
+    mode: "0600"
+
+- name: Apply kubelet-serving-cert-approver manifest
+  ansible.builtin.command:
+    cmd: kubectl apply -f {{ kubeconfig_path | dirname }}/kubelet-serving-cert-approver.yaml
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: apply_result
+  changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout"
+
+- name: Wait for kubelet-serving-cert-approver deployment to be ready
+  ansible.builtin.command:
+    cmd: >-
+      kubectl rollout status deployment/kubelet-serving-cert-approver
+        --namespace kubelet-serving-cert-approver
+        --timeout=120s
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: rollout_result
+  changed_when: false

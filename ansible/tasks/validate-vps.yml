@@ -1,0 +1,114 @@
+---
+# tasks/validate-vps.yml — Validate VPS config and set computed variables
+#
+# Prerequisite: tasks/load-config.yml must run first
+#
+# Network settings (gateway, subnet_mask, nameservers, install_disk) are
+# auto-detected from rescue mode by the vps_detect role and saved as
+# node-facts-<name>.yml in env_dir. Config.yml values override detected values.
+#
+# Node `host` field: hostname or IPv4 address to connect to.
+# Node `ip` field: (optional) static IPv4 for Talos config.
+#   - If host is an IPv4 and ip is not set, ip defaults to host.
+#   - If host is a hostname, ip must be set explicitly.
+#
+# Node `role` field: cp | worker | cpworker
+#   - cp: control plane only (NoSchedule taint)
+#   - worker: worker only
+#   - cpworker: combined control plane + worker (schedules workloads)
+
+- name: Validate platform is vps
+  ansible.builtin.fail:
+    msg: "This playbook is for VPS environments. config.yml has platform='{{ platform | default('undefined') }}'"
+  when: platform | default('') != 'vps'
+
+- name: Validate required VPS fields
+  ansible.builtin.fail:
+    msg: "Missing required field: {{ item }}"
+  loop:
+    - cluster_name
+    - talos_version
+    - talos_schematic_id
+    - nodes
+  when: lookup('vars', item, default='__MISSING__') == '__MISSING__'
+
+- name: Validate node roles
+  ansible.builtin.fail:
+    msg: "Node {{ item.name }}: invalid role '{{ item.role | default('undefined') }}'. Must be cp, worker, or cpworker."
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.role | default('') not in ['cp', 'worker', 'cpworker']
+
+- name: Validate at least one control plane node
+  ansible.builtin.fail:
+    msg: "No control plane nodes defined. At least one node must have role 'cp' or 'cpworker'."
+  when: nodes | selectattr('role', 'in', ['cp', 'cpworker']) | list | length == 0
+
+# Resolve ip for each node: if host is an IPv4, ip defaults to host.
+# If host is a hostname, ip must be explicitly set in config.yml.
+- name: Build enriched nodes list
+  ansible.builtin.set_fact:
+    _enriched_nodes: "{{ _enriched_nodes | default([]) + [_enriched_node] }}"
+  vars:
+    _host_is_ipv4: "{{ item.host | default('') | regex_search('^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$') is not none }}"
+    _resolved_ip: "{{ item.ip | default(item.host if (_host_is_ipv4 | bool) else '') }}"
+    _enriched_node: "{{ item | combine({'ip': _resolved_ip}) }}"
+  loop: "{{ nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Validate all nodes have resolved IPs
+  ansible.builtin.fail:
+    msg: >-
+      Node {{ item.name }}: host '{{ item.host }}' is not an IPv4 address and no explicit 'ip' is set.
+      When using a hostname for 'host', you must also set 'ip' with the node's static IPv4 address.
+  loop: "{{ _enriched_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.ip | default('') == ''
+
+# Derive role-based lists from enriched nodes
+- name: Set computed variables
+  ansible.builtin.set_fact:
+    env_dir: "{{ env_dir }}"
+    cluster_name: "{{ cluster_name }}"
+    talos_version: "{{ talos_version }}"
+    talos_schematic_id: "{{ talos_schematic_id }}"
+    talos_install_image: "factory.talos.dev/installer/{{ talos_schematic_id }}:{{ talos_version }}"
+    talos_metal_image_url: "https://factory.talos.dev/image/{{ talos_schematic_id }}/{{ talos_version }}/metal-amd64.raw.xz"
+    all_nodes: "{{ _enriched_nodes }}"
+    controlplane_nodes: "{{ _enriched_nodes | selectattr('role', 'in', ['cp', 'cpworker']) | list }}"
+    worker_nodes: "{{ _enriched_nodes | selectattr('role', 'equalto', 'worker') | list }}"
+    cluster_endpoint: "{{ 'https://' ~ (_enriched_nodes | selectattr('role', 'in', ['cp', 'cpworker']) | first).ip ~ ':6443' }}"
+    cilium_version: "{{ cilium_version | default('1.17.3') }}"
+
+- name: Add rescue mode hosts to inventory
+  ansible.builtin.add_host:
+    name: "{{ item.name }}"
+    ansible_host: "{{ item.host }}"
+    ansible_user: "{{ item.rescue_ssh_user | default('root') }}"
+    ansible_ssh_pass: "{{ item.rescue_ssh_pass | default(omit) }}"
+    ansible_ssh_extra_args: >-
+      {{ '-4' if not (item.host | regex_search('^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')) else '' }}
+      -o StrictHostKeyChecking=no
+      -o UserKnownHostsFile=/dev/null
+      {{ '-o PubkeyAuthentication=no' if item.rescue_ssh_pass is defined else '' }}
+    groups: rescue_mode
+    # Pass vars needed by vps_detect and talos_install roles
+    _node_ip: "{{ item.ip }}"
+    _env_dir: "{{ env_dir }}"
+    _node_config: "{{ item }}"
+    talos_metal_image_url: "{{ talos_metal_image_url }}"
+  loop: "{{ all_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Show deployment info
+  ansible.builtin.debug:
+    msg: |
+      Cluster:     {{ cluster_name }}
+      Endpoint:    {{ cluster_endpoint }}
+      Env folder:  {{ env_dir }}
+      CP nodes:    {{ controlplane_nodes | map(attribute='name') | join(', ') }}
+      Workers:     {{ worker_nodes | map(attribute='name') | join(', ') | default('(none)') }}

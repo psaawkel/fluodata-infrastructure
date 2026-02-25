@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# Role: proxmox_dnsmasq — Configure dnsmasq DHCP reservations for Talos VMs
+#
+# Generates /etc/dnsmasq.d/<bridge>.conf with static DHCP leases for all nodes
+# defined in config.yml. Restarts dnsmasq when config changes.
+#
+# Runs on Proxmox host (via SSH).
+# =============================================================================
+
+- name: Generate dnsmasq config for {{ vm_bridge }}
+  ansible.builtin.template:
+    src: vmbr1.conf.j2
+    dest: "/etc/dnsmasq.d/{{ vm_bridge }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  register: dnsmasq_config
+
+- name: Restart dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted
+  when: dnsmasq_config.changed
+
+- name: Verify dnsmasq is running
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: started
+    enabled: true

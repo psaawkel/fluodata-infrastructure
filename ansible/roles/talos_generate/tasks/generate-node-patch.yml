@@ -1,0 +1,47 @@
+---
+# Subtask: generate patch for a single node
+# Called from main.yml with loop_var: _node
+#
+# Resolves per-node network settings from:
+#   1. Config.yml node-level override (e.g., node.gateway)
+#   2. Auto-detected facts from node-facts-<name>.yml
+#   3. Global config.yml defaults (vm_gateway, vm_subnet_mask, etc.) — Proxmox compat
+
+- name: "{{ _node.name }} — Check for auto-detected node facts"
+  ansible.builtin.stat:
+    path: "{{ env_dir }}/node-facts-{{ _node.name }}.yml"
+  register: _facts_file
+
+- name: "{{ _node.name }} — Load auto-detected node facts"
+  ansible.builtin.include_vars:
+    file: "{{ env_dir }}/node-facts-{{ _node.name }}.yml"
+    name: _detected
+  when: _facts_file.stat.exists
+
+- name: "{{ _node.name }} — Set empty detected facts if no facts file"
+  ansible.builtin.set_fact:
+    _detected: {}
+  when: not _facts_file.stat.exists
+
+- name: "{{ _node.name }} — Resolve node network settings"
+  ansible.builtin.set_fact:
+    _node_gateway: "{{ _node.gateway | default(_detected.gateway | default(vm_gateway | default(''))) }}"
+    _node_subnet_mask: "{{ _node.subnet_mask | default(_detected.subnet_mask | default(vm_subnet_mask | default(24))) }}"
+    _node_nameservers: "{{ _node.nameservers | default(_detected.nameservers | default(vm_nameservers | default(['1.1.1.1', '8.8.8.8']))) }}"
+    _node_install_disk: "{{ _node.install_disk | default(_detected.install_disk | default(talos_install_disk | default('/dev/sda'))) }}"
+
+- name: "{{ _node.name }} — Fail if gateway not resolved"
+  ansible.builtin.fail:
+    msg: >-
+      Cannot determine gateway for {{ _node.name }}.
+      Either run vps-deploy-rescue.yml first (auto-detects from rescue mode),
+      or set gateway in config.yml (per-node or global vm_gateway).
+  when: _node_gateway == ''
+
+- name: "{{ _node.name }} — Generate per-node patch"
+  ansible.builtin.template:
+    src: patch-node.yaml.j2
+    dest: "{{ env_dir }}/patch-{{ _node.name }}.yaml"
+    mode: "0600"
+  vars:
+    item: "{{ _node }}"

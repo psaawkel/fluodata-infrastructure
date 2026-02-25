@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# proxmox-deploy.yml — Deploy Talos cluster on Proxmox
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook proxmox-deploy.yml -e env=../environments/proxmox-homelab
+# =============================================================================
+
+# --- Load config, validate, generate Talos configs ---
+- name: Load config and generate Talos configs
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - ansible.builtin.include_tasks: tasks/load-config.yml
+    - ansible.builtin.include_tasks: tasks/validate-proxmox.yml
+  roles:
+    - talos_generate
+
+# --- Create VMs, apply configs, bootstrap, install Cilium ---
+- name: Deploy Talos cluster on Proxmox
+  hosts: proxmox_hosts
+  gather_facts: false
+  roles:
+    - proxmox_dnsmasq
+    - proxmox_vms
+    - talos_bootstrap_proxmox
+    - proxmox_post_install
+    - cilium
+    - kubelet_cert_approver
+
+# --- Install ArgoCD (runs on localhost using fetched kubeconfig) ---
+- name: Install ArgoCD
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - ansible.builtin.include_tasks: tasks/load-config.yml
+    - ansible.builtin.include_tasks: tasks/validate-proxmox.yml
+    - name: Set kubeconfig path for ArgoCD
+      ansible.builtin.set_fact:
+        kubeconfig_path: "{{ env_dir }}/kubeconfig"
+  roles:
+    - argocd
