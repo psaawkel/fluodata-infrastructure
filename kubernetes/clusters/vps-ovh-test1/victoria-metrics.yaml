@@ -1,0 +1,159 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: victoria-metrics
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://victoriametrics.github.io/helm-charts/
+    chart: victoria-metrics-k8s-stack
+    targetRevision: "0.30.0"
+    helm:
+      valuesObject:
+        # Short name to avoid >63 char limit on generated resource names.
+        fullnameOverride: vmstack
+
+        # --- Operator ---
+        victoria-metrics-operator:
+          enabled: true
+          operator:
+            disable_prometheus_converter: false
+
+        # --- VMSingle (single-server metrics storage) ---
+        vmsingle:
+          enabled: true
+          spec:
+            retentionPeriod: "1" # 1 month
+            storage:
+              storageClassName: local-path
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 5Gi
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+
+        vmcluster:
+          enabled: false
+
+        # --- VMAgent ---
+        vmagent:
+          enabled: true
+          spec:
+            scrapeInterval: 15s
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 250m
+                memory: 256Mi
+
+        # --- VMAlert ---
+        vmalert:
+          enabled: true
+          spec:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                cpu: 100m
+                memory: 128Mi
+
+        # --- Alertmanager ---
+        alertmanager:
+          enabled: true
+          spec:
+            replicaCount: 1
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: local-path
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 512Mi
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+
+        vmauth:
+          enabled: false
+
+        # --- Grafana ---
+        grafana:
+          enabled: true
+          deploymentStrategy:
+            type: Recreate
+          persistence:
+            enabled: true
+            storageClassName: local-path
+            size: 1Gi
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              url: http://loki-gateway.logging.svc.cluster.local
+              access: proxy
+              isDefault: false
+              jsonData:
+                maxLines: 1000
+
+        # --- Sub-charts ---
+        prometheus-node-exporter:
+          enabled: true
+        kube-state-metrics:
+          enabled: true
+
+        defaultDatasources:
+          victoriametrics:
+            enabled: true
+          prometheus:
+            enabled: false
+
+        # --- Talos compatibility: these components are not exposed by Talos ---
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

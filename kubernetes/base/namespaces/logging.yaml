@@ -1,0 +1,9 @@
+# logging namespace — Loki log store and Grafana Alloy log agent.
+# Alloy runs as a DaemonSet with host log access → privileged.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
