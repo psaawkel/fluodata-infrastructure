@@ -15,7 +15,7 @@ spec:
         members: 3
         storage:
           storageClassName: local-path
-          capacity: 10Gi
+          capacity: 15Gi
         resources:
           requests:
             cpu: 250m
