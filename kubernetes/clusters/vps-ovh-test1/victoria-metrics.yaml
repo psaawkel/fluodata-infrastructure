@@ -101,6 +101,13 @@ spec:
           adminPassword: "Admin1234!"
           deploymentStrategy:
             type: Recreate
+          sidecar:
+            datasources:
+              enabled: true
+              # Watch ConfigMaps with this label in all namespaces
+              label: grafana_datasource
+              labelValue: "1"
+              initDatasources: true
           persistence:
             enabled: true
             storageClassName: local-path
