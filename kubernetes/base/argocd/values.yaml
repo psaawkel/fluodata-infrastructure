@@ -11,16 +11,33 @@ repoServer:
 
   initContainers:
     - name: install-ksops
-      image: viaductoss/ksops:v4.4.0
+      image: alpine:3.21
       command: ["/bin/sh", "-c"]
       args:
-        - echo "Installing KSOPS...";
-          mv ksops /custom-tools/;
-          mv kustomize /custom-tools/;
-          echo "Done.";
+        - |
+          set -e
+          KSOPS_VERSION=v4.4.0
+          SOPS_VERSION=v3.9.4
+          KUSTOMIZE_VERSION=v5.6.0
+          KSOPS_VER_NUM=$(echo ${KSOPS_VERSION} | sed 's/^v//')
+          wget -qO /tmp/ksops.tar.gz "https://github.com/viaduct-ai/kustomize-sops/releases/download/${KSOPS_VERSION}/ksops_${KSOPS_VER_NUM}_Linux_x86_64.tar.gz"
+          tar -xzf /tmp/ksops.tar.gz -C /custom-tools/
+          wget -qO /custom-tools/sops "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
+          wget -qO /tmp/kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/kustomize.tar.gz -C /custom-tools/
+          chmod +x /custom-tools/ksops /custom-tools/sops /custom-tools/kustomize
+          echo "Installed ksops ${KSOPS_VERSION}, sops ${SOPS_VERSION}, kustomize ${KUSTOMIZE_VERSION}"
       volumeMounts:
         - mountPath: /custom-tools
           name: custom-tools
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 65534
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
 
   volumeMounts:
     - mountPath: /usr/local/bin/kustomize
@@ -29,6 +46,9 @@ repoServer:
     - mountPath: /usr/local/bin/ksops
       name: custom-tools
       subPath: ksops
+    - mountPath: /usr/local/bin/sops
+      name: custom-tools
+      subPath: sops
     - mountPath: /.config/sops/age
       name: sops-age
 

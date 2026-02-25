@@ -179,6 +179,8 @@
     cmd: helm repo update
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: true
+  failed_when: false
 
 - name: Install ArgoCD via Helm
   ansible.builtin.command:
