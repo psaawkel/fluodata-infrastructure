@@ -1,5 +1,117 @@
 ---
-# Minimal operator runtime pieces: ServiceAccount, Deployment, webhook Service, RBAC.
-# These are currently sourced from the upstream deploy/operator manifests but should be
-# trimmed to only the necessary runtime resources. The full deploy/operator tree remains
-# in `operator/upstream` for reference but ArgoCD will now point at this runtime dir.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scylla-operator
+  namespace: scylla-operator
+  labels:
+    app.kubernetes.io/name: scylla-operator
+    app.kubernetes.io/instance: scylla-operator
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scylla-operator
+      app.kubernetes.io/instance: scylla-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scylla-operator
+        app.kubernetes.io/instance: scylla-operator
+    spec:
+      serviceAccountName: scylla-operator
+      containers:
+      - name: controller
+        image: docker.io/scylladb/scylla-operator:latest
+        imagePullPolicy: IfNotPresent
+        args: ["operator", "--loglevel=2"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+      - name: webhook
+        image: docker.io/scylladb/scylla-operator:latest
+        imagePullPolicy: IfNotPresent
+        args: ["run-webhook-server", "--tls-cert-file=/tmp/k8s-webhook-server/serving-certs/tls.crt", "--tls-private-key-file=/tmp/k8s-webhook-server/serving-certs/tls.key", "--port=5000"]
+        ports:
+        - containerPort: 5000
+          name: webhook
+        volumeMounts:
+        - name: cert
+          mountPath: /tmp/k8s-webhook-server/serving-certs/
+          readOnly: true
+      volumes:
+      - name: cert
+        secret:
+          secretName: scylla-operator-serving-cert
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scylla-operator-webhook
+  namespace: scylla-operator
+  labels:
+    app.kubernetes.io/name: scylla-operator
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ports:
+  - port: 443
+    targetPort: 5000
+    name: webhook
+  selector:
+    app.kubernetes.io/name: scylla-operator
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: scylla-operator
+  annotations:
+    cert-manager.io/inject-ca-from: scylla-operator/scylla-operator-serving-cert
+    argocd.argoproj.io/sync-wave: "1"
+webhooks:
+- name: webhook.scylla.scylladb.com
+  clientConfig:
+    service:
+      name: scylla-operator-webhook
+      namespace: scylla-operator
+      path: /validate
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  failurePolicy: Fail
+  rules:
+  - apiGroups: ["scylla.scylladb.com"]
+    apiVersions: ["v1"]
+    operations: ["CREATE","UPDATE"]
+    resources: ["scyllaclusters"]
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: scylla-operator-selfsigned-issuer
+  namespace: scylla-operator
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  selfSigned: {}
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: scylla-operator-serving-cert
+  namespace: scylla-operator
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  dnsNames:
+  - scylla-operator-webhook.scylla-operator.svc
+  issuerRef:
+    kind: Issuer
+    name: scylla-operator-selfsigned-issuer
+  secretName: scylla-operator-serving-cert
