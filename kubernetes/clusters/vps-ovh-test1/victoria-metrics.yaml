@@ -98,6 +98,7 @@ spec:
         # --- Grafana ---
         grafana:
           enabled: true
+          adminPassword: "Admin1234!"
           deploymentStrategy:
             type: Recreate
           persistence:
