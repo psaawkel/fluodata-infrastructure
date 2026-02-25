@@ -1,0 +1,194 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ .scyllaDBMonitoringName }}-grafana"
+spec:
+  selector:
+    matchLabels:
+      scylla-operator.scylladb.com/deployment-name: "{{ .scyllaDBMonitoringName }}-grafana"
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        scylla-operator.scylladb.com/inputs-hash: "{{ .restartTriggerHash }}"
+      labels:
+        scylla-operator.scylladb.com/deployment-name: "{{ .scyllaDBMonitoringName }}-grafana"
+    spec:
+      serviceAccountName: "{{ .scyllaDBMonitoringName }}-grafana"
+      affinity:
+        {{- .affinity | toYAML | nindent 8 }}
+      tolerations:
+        {{- .tolerations | toYAML | nindent 8 }}
+      initContainers:
+      - name: gzip
+        image: "{{ .bashToolsImage }}"
+        command:
+        - /usr/bin/bash
+        - -euExo
+        - pipefail
+        - -O
+        - inherit_errexit
+        - -c
+        args:
+        - |
+          mkdir /var/run/decompressed-configmaps/grafana-scylladb-dashboards
+          find /var/run/configmaps -mindepth 2 -maxdepth 2 -type d | while read -r d; do
+            tp="/var/run/decompressed-configmaps/${d#"/var/run/configmaps/"}"
+            mkdir "${tp}"
+            find "${d}" -mindepth 1 -maxdepth 1 -name '*.gz.base64' -exec cp -L -t "${tp}" {} +
+          done
+          find /var/run/decompressed-configmaps -name '*.gz.base64' | while read -r f; do
+            base64 -d "${f}" > "${f%.base64}"
+            rm "${f}"
+          done
+          find /var/run/decompressed-configmaps -name '*.gz' -exec gzip -d {} +
+        volumeMounts:
+        - name: decompressed-configmaps
+          mountPath: /var/run/decompressed-configmaps
+        {{- range $_, $cm := .dashboardsCMs }}
+        - name: "{{ $cm.Name }}"
+          mountPath: "/var/run/configmaps/grafana-scylladb-dashboards/{{ index $cm.Annotations "internal.scylla-operator.scylladb.com/dashboard-name" }}"
+        {{- else }}
+        !!! No dashboards names found !!!
+        {{- end }}
+      containers:
+      - name: grafana
+        image: "{{ .grafanaImage }}"
+        command:
+        - grafana-server
+        - --packaging=docker
+        - --homepath=/usr/share/grafana
+        - --config=/var/run/configmaps/grafana-configs/grafana.ini
+        env:
+        - name: GF_PATHS_PROVISIONING
+        - name: GF_PATHS_HOME
+        - name: GF_PATHS_DATA
+        - name: GF_PATHS_LOGS
+        - name: GF_PATHS_PLUGINS
+        - name: GF_PATHS_CONFIG
+        ports:
+        - containerPort: 3000
+          name: grafana
+          protocol: TCP
+        readinessProbe:
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 1
+          httpGet:
+            path: /api/health
+            port: 3000
+            scheme: HTTPS
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 10
+          httpGet:
+            path: /api/health
+            port: 3000
+            scheme: HTTPS
+        resources:
+          {{- .resources | toYAML | nindent 10 }}
+        volumeMounts:
+        - name: grafana-configs
+          mountPath: /var/run/configmaps/grafana-configs
+        - name: decompressed-configmaps
+          mountPath: /var/run/dashboards/scylladb
+          subPath: grafana-scylladb-dashboards
+        - name: grafana-provisioning
+          mountPath: /var/run/configmaps/grafana-provisioning/access-control/access-control.yaml
+          subPath: access-control.yaml
+        - name: grafana-provisioning
+          mountPath: /var/run/configmaps/grafana-provisioning/alerting/alerting.yaml
+          subPath: alerting.yaml
+        - name: grafana-provisioning
+          mountPath: /var/run/configmaps/grafana-provisioning/dashboards/dashboards.yaml
+          subPath: dashboards.yaml
+        - name: grafana-provisioning
+          mountPath: /var/run/configmaps/grafana-provisioning/datasources/datasources.yaml
+          subPath: datasources.yaml
+        - name: grafana-provisioning
+          mountPath: /var/run/configmaps/grafana-provisioning/notifiers/notifiers.yaml
+          subPath: notifiers.yaml
+        - name: grafana-provisioning
+          mountPath: /var/run/configmaps/grafana-provisioning/plugins/plugins.yaml
+          subPath: plugins.yaml
+        - name: grafana-admin-credentials
+          mountPath: /var/run/secrets/grafana-admin-credentials
+        - name: grafana-serving-certs
+          mountPath: /var/run/secrets/grafana-serving-certs
+        {{- if and .prometheusTLSSpec .prometheusTLSSpec.ClientTLSKeyPairSecretRef }}
+        - name: prometheus-client-certs
+          mountPath: /var/run/secrets/prometheus-client-certs
+        {{- end }}
+        {{- if and .prometheusTLSSpec .prometheusTLSSpec.ServingCAConfigMapRef }}
+        - name: prometheus-serving-ca
+          mountPath: /var/run/configmaps/prometheus-serving-ca
+        {{- end }}
+        {{- if and .prometheusAuthSpec .prometheusAuthSpec.BearerTokenSecretRef }}
+        - name: prometheus-bearer-token
+          mountPath: /var/run/secrets/prometheus-bearer-token
+        {{- end }}
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsNonRoot: true
+          runAsUser: 472
+          runAsGroup: 472
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: decompressed-configmaps
+        emptyDir:
+          sizeLimit: 50Mi
+      - name: grafana-configs
+        configMap:
+          name: "{{ .scyllaDBMonitoringName }}-grafana-configs"
+      {{- range $_, $cm := .dashboardsCMs }}
+      - name: "{{ $cm.Name }}"
+        configMap:
+          name: "{{ $cm.Name }}"
+      {{- else }}
+      !!! No dashboards names found !!!
+      {{- end }}
+      - name: grafana-provisioning
+        configMap:
+          name: "{{ .scyllaDBMonitoringName }}-grafana-provisioning"
+      - name: grafana-admin-credentials
+        secret:
+          secretName: "{{ .scyllaDBMonitoringName }}-grafana-admin-credentials"
+      - name: grafana-serving-certs
+        secret:
+          secretName: "{{ .servingCertSecretName }}"
+      {{- if and .prometheusTLSSpec .prometheusTLSSpec.ClientTLSKeyPairSecretRef }}
+      - name: prometheus-client-certs
+        secret:
+          secretName: "{{ .prometheusTLSSpec.ClientTLSKeyPairSecretRef.Name }}"
+      {{- end }}
+      {{- if and .prometheusTLSSpec .prometheusTLSSpec.ServingCAConfigMapRef }}
+      - name: prometheus-serving-ca
+        configMap:
+          name: "{{ .prometheusTLSSpec.ServingCAConfigMapRef.Name }}"
+      {{- end }}
+      {{- if and .prometheusAuthSpec .prometheusAuthSpec.BearerTokenSecretRef }}
+      - name: prometheus-bearer-token
+        secret:
+          secretName: "{{ .prometheusAuthSpec.BearerTokenSecretRef.Name }}"
+      {{- end }}
+      - name: grafana-storage
+        emptyDir:
+          sizeLimit: 100Mi
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault

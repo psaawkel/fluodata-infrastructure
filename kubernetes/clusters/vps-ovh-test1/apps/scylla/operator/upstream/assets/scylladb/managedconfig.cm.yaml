@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: "{{ .Namespace }}"
+  name: "{{ .Name }}"
+data:
+  {{ .ManagedConfigName | printf "%q" }}: |
+    cluster_name: "{{ .ClusterName }}"
+    {{- if eq .IPFamily "IPv6" }}
+    rpc_address: "::"
+    api_address: "::"
+    listen_address: "::"
+    seed_provider:
+      - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+        parameters:
+          - seeds: "::1"
+    {{- else }}
+    rpc_address: "0.0.0.0"
+    api_address: "127.0.0.1"
+    listen_address: "0.0.0.0"
+    seed_provider:
+      - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+        parameters:
+          - seeds: "127.0.0.1"
+    {{- end }}
+    endpoint_snitch: "GossipingPropertyFileSnitch"
+    internode_compression: "all"
+
+    {{- if .EnableTLS }}
+    native_transport_port_ssl: 9142
+    native_shard_aware_transport_port_ssl: 19142
+    client_encryption_options:
+      enabled: true
+      optional: false
+      certificate: "/var/run/secrets/scylla-operator.scylladb.com/scylladb/serving-certs/tls.crt"
+      keyfile: "/var/run/secrets/scylla-operator.scylladb.com/scylladb/serving-certs/tls.key"
+      require_client_auth: true
+      truststore: "/var/run/configmaps/scylla-operator.scylladb.com/scylladb/client-ca/ca-bundle.crt"
+    {{- end }}
+    {{- if .Spec.ScyllaDB.AlternatorOptions }}
+    alternator_write_isolation: {{ or .Spec.ScyllaDB.AlternatorOptions.WriteIsolation "always_use_lwt" }}
+      {{- if or ( isTrue .AlternatorInsecureDisableAuthorization ) ( and .AlternatorPort ( not .AlternatorInsecureDisableAuthorization ) ) }}
+    alternator_enforce_authorization: false
+      {{- else }}
+    alternator_enforce_authorization: true
+      {{- end }}
+      {{- if .AlternatorPort }}
+    alternator_port: {{ .AlternatorPort }}
+      {{- else if isTrue .AlternatorInsecureEnableHTTP }}
+    alternator_port: 8000
+      {{- end }}
+    alternator_https_port: 8043
+    alternator_encryption_options:
+      certificate: "/var/run/secrets/scylla-operator.scylladb.com/scylladb/alternator-serving-certs/tls.crt"
+      keyfile: "/var/run/secrets/scylla-operator.scylladb.com/scylladb/alternator-serving-certs/tls.key"
+    {{- end }}

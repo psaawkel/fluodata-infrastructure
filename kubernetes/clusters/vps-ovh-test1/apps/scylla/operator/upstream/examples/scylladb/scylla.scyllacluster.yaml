@@ -1,0 +1,38 @@
+apiVersion: scylla.scylladb.com/v1
+kind: ScyllaCluster
+metadata:
+  name: scylla
+spec:
+  agentVersion: 3.8.1@sha256:f29c3e0659ccc918d809d74624abf42ac72eed4f3a5e9c982989740538318f78
+  version: 2025.4.3
+  developerMode: true
+  automaticOrphanedNodeCleanup: true
+  datacenter:
+    name: us-east-1
+    racks:
+      - name: us-east-1a
+        members: 1
+        storage:
+          capacity: 1Gi
+          storageClassName: scylladb-local-xfs
+        resources:
+          requests:
+            cpu: 10m
+            memory: 100Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
+        placement:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: scylla.scylladb.com/node-type
+                      operator: In
+                      values:
+                        - scylla
+          tolerations:
+            - effect: NoSchedule
+              key: scylla-operator.scylladb.com/dedicated
+              operator: Equal
+              value: scyllaclusters

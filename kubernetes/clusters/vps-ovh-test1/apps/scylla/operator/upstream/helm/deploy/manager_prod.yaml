@@ -1,0 +1,56 @@
+# Scylla Manager image
+image:
+  repository: docker.io/scylladb
+  tag: 3.8.1@sha256:7ef20e8aefd378d452d50783a9c61159f6f016ab6a6c95b4159474554d05550d
+controllerImage:
+  repository: docker.io/scylladb
+logLevel: info
+# Resources allocated to Scylla Manager pods
+resources:
+  requests:
+    cpu: 10m
+    memory: 20Mi
+# Resources allocated to Scylla Manager Controller pods
+controllerResources:
+  requests:
+    cpu: 10m
+    memory: 20Mi
+# Scylla instance for Manager
+scylla:
+  fullnameOverride: scylla-manager-cluster
+  scyllaImage:
+    repository: docker.io/scylladb/scylla
+    tag: 2025.4.3
+  agentImage:
+    tag: 3.8.1@sha256:f29c3e0659ccc918d809d74624abf42ac72eed4f3a5e9c982989740538318f78
+    repository: docker.io/scylladb/scylla-manager-agent
+  developerMode: true
+  cpuset: true
+  datacenter: manager-dc
+  racks:
+    - name: manager-rack
+      members: 1
+      storage:
+        capacity: 5Gi
+        storageClassName: scylladb-local-xfs
+      resources:
+        limits:
+          cpu: 1
+          memory: 200Mi
+        requests:
+          cpu: 1
+          memory: 200Mi
+      placement:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: scylla.scylladb.com/node-type
+                    operator: In
+                    values:
+                      - scylla
+        tolerations:
+          - key: scylla-operator.scylladb.com/dedicated
+            operator: Equal
+            value: scyllaclusters
+            effect: NoSchedule

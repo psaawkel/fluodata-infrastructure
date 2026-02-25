@@ -1,0 +1,58 @@
+apiVersion: scylla.scylladb.com/v1alpha1
+kind: ScyllaDBMonitoring
+metadata:
+  name: "{{ .name }}"
+spec:
+  endpointsSelector:
+    matchLabels:
+      app.kubernetes.io/name: scylla
+      scylla-operator.scylladb.com/scylla-service-type: member
+      scylla/cluster: "{{ .scyllaClusterName }}"
+  components:
+    prometheus:
+      exposeOptions:
+        webInterface:
+          ingress:
+            {{- with .ingressClassName }}
+            ingressClassName: {{ . }}
+            {{- end }}
+            dnsDomains:
+            - "{{ .name }}-prometheus.{{ .namespace }}.apps.cluster.scylladb.com"
+            {{- with .ingressCustomAnnotations }}
+            annotations:
+              {{- . | toYAML | nindent 14 }}
+            {{- end }}
+      storage:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 1Gi
+        {{- if .storageClassName }}
+            storageClassName: {{ .storageClassName }}
+        {{- end }}
+      placement:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: scylla.scylladb.com/node-type
+                operator: In
+                values:
+                - scylla
+        tolerations:
+        - effect: NoSchedule
+          key: scylla-operator.scylladb.com/dedicated
+          operator: Equal
+          value: scyllaclusters
+    grafana:
+      exposeOptions:
+        webInterface:
+          ingress:
+            ingressClassName: {{ .ingressClassName }}
+            dnsDomains:
+            - "{{ .name }}-grafana.{{ .namespace }}.apps.cluster.scylladb.com"
+            {{- with .ingressCustomAnnotations }}
+            annotations:
+              {{- . | toYAML | nindent 14 }}
+            {{- end }}

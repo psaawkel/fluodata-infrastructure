@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#
+# Copyright (C) 2023 ScyllaDB
+#
+
+set -euExo pipefail
+shopt -s inherit_errexit
+
+trap 'kill $( jobs -p ); exit 0' EXIT
+
+if [ -z "${ARTIFACTS+x}" ]; then
+  echo "ARTIFACTS can't be empty" > /dev/stderr
+  exit 2
+fi
+
+source "$( dirname "${BASH_SOURCE[0]}" )/../lib/kube.sh"
+source "$( dirname "${BASH_SOURCE[0]}" )/lib/e2e.sh"
+source "$( dirname "${BASH_SOURCE[0]}" )/run-e2e-shared.env.sh"
+parent_dir="$( dirname "${BASH_SOURCE[0]}" )"
+
+trap gather-artifacts-on-exit EXIT
+trap gracefully-shutdown-e2es INT
+
+SO_NODECONFIG_PATH="${SO_NODECONFIG_PATH=${parent_dir}/manifests/cluster/nodeconfig-openshift-aws.yaml}"
+export SO_NODECONFIG_PATH
+
+SO_CSI_DRIVER_PATH="${SO_CSI_DRIVER_PATH=${parent_dir}/manifests/namespaces/local-csi-driver/}"
+export SO_CSI_DRIVER_PATH
+
+# TODO: When https://github.com/scylladb/scylla-operator/issues/2490 is completed,
+# we should make sure we have all required CRDs in the OpenShift cluster.
+SO_DISABLE_PROMETHEUS_OPERATOR="${SO_DISABLE_PROMETHEUS_OPERATOR:-true}"
+export SO_DISABLE_PROMETHEUS_OPERATOR
+
+SO_ENABLE_OPENSHIFT_USER_WORKLOAD_MONITORING="${SO_ENABLE_OPENSHIFT_USER_WORKLOAD_MONITORING:-true}"
+export SO_ENABLE_OPENSHIFT_USER_WORKLOAD_MONITORING
+
+SO_SCYLLA_OPERATOR_INSTALL_MODE="${SO_SCYLLA_OPERATOR_INSTALL_MODE:-olm}"
+export SO_SCYLLA_OPERATOR_INSTALL_MODE
+
+run-deploy-script-in-all-clusters "${parent_dir}/../ci-deploy.sh"
+
+apply-e2e-workarounds-in-all-clusters
+run-e2e
