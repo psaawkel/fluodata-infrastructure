@@ -115,14 +115,7 @@ spec:
           service:
             type: NodePort
             nodePort: 30300
-          additionalDataSources:
-            - name: Loki
-              type: loki
-              url: http://loki-gateway.logging.svc.cluster.local
-              access: proxy
-              isDefault: false
-              jsonData:
-                maxLines: 1000
+          additionalDataSources: []
 
         # --- Sub-charts ---
         prometheus-node-exporter:
