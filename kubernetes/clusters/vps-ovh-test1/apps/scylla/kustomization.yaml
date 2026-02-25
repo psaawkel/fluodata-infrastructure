@@ -1,7 +1,0 @@
-resources:
-  - operator/runtime/00-crd-scylladbclusters.yaml
-  - operator/runtime/00-crd-scylladbdatacenters.yaml
-  - operator/runtime/10-operator-namespace-serviceaccount.yaml
-  - operator/runtime/10-operator-clusterroles-bindings.yaml
-  - operator/runtime/10-operator-deploy.yaml
-  - ../scylla-cluster.yaml

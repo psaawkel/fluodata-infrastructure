@@ -1,5 +1,0 @@
----
-# Minimal CRDs required by the operator (cleaned / stripped of large annotations)
-# The original CRD files were large and included kubectl last-applied blocks.
-# Keep only the required CRD YAMLs here. This file should be replaced with the
-# individual cleaned CRD manifests for each CRD if preferred.
