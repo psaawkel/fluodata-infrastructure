@@ -11,7 +11,7 @@ spec:
   source:
     repoURL: git@github.com:psaawkel/fluodata-infrastructure.git
     targetRevision: opencode-opus
-    path: kubernetes/clusters/vps-ovh-test1/apps/scylla/operator/upstream/deploy/operator
+    path: kubernetes/clusters/vps-ovh-test1/apps/scylla/operator/runtime
   destination:
     server: https://kubernetes.default.svc
     namespace: scylla-operator

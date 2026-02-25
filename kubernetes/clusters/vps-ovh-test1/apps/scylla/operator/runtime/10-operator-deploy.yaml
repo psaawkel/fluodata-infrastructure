@@ -1,0 +1,5 @@
+---
+# Minimal operator runtime pieces: ServiceAccount, Deployment, webhook Service, RBAC.
+# These are currently sourced from the upstream deploy/operator manifests but should be
+# trimmed to only the necessary runtime resources. The full deploy/operator tree remains
+# in `operator/upstream` for reference but ArgoCD will now point at this runtime dir.

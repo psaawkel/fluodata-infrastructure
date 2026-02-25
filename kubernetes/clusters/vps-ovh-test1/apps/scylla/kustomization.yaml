@@ -1,4 +1,3 @@
 resources:
-  - operator/upstream/bundle/manifests
   - operator/upstream/deploy/operator
   - ../scylla-cluster.yaml

@@ -6,13 +6,14 @@ metadata:
   annotations:
     # ensure CRDs sync before operator/controller (low number = earlier)
     argocd.argoproj.io/sync-wave: "0"
+    # point CRDs application at curated runtime CRDs (not the whole upstream bundle)
 spec:
   project: default
   source:
     repoURL: git@github.com:psaawkel/fluodata-infrastructure.git
     targetRevision: opencode-opus
-    # use the deploy/operator path which contains plain CRD + runtime manifests
-    path: kubernetes/clusters/vps-ovh-test1/apps/scylla/operator/upstream/deploy/operator
+    # use the runtime path which will contain cleaned CRDs only
+    path: kubernetes/clusters/vps-ovh-test1/apps/scylla/operator/runtime
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
