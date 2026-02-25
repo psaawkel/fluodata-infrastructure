@@ -1,5 +1,0 @@
-[submodule "scylla-monitoring"]
-	path = submodules/github.com/scylladb/scylla-monitoring
-	url = https://github.com/scylladb/scylla-monitoring.git
-	# renovate: datasource=github-releases depName=scylladb/scylla-monitoring
-	branch = 4.14.0
