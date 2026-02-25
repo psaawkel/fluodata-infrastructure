@@ -28,6 +28,7 @@ environments/*/patch-*.yaml
 environments/*/*.txt
 environments/*/kubelet-serving-cert-approver.yaml
 environments/*/argocd-root-app.yaml
+environments/*/.*
 
 # Example environments (always committed, never encrypted)
 # Real environments: config.yml is SOPS-encrypted, committed to git.

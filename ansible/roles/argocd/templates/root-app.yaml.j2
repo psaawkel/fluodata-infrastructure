@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: {{ _argocd_git_repo }}
-    targetRevision: HEAD
+    targetRevision: {{ _argocd_git_branch }}
     path: kubernetes/clusters/{{ _argocd_cluster_dir }}
   destination:
     server: https://kubernetes.default.svc
