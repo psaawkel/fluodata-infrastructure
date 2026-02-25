@@ -1,0 +1,100 @@
+# =============================================================================
+# Proxmox local VM environment — Talos dev cluster
+#
+# Deploy:
+#   cd ansible
+#   ansible-playbook proxmox-deploy.yml -e env=../environments/proxmox-local-vm
+#
+# Destroy:
+#   ansible-playbook proxmox-destroy.yml -e env=../environments/proxmox-local-vm
+# =============================================================================
+platform: proxmox
+# --- Proxmox connection ---
+proxmox_host: 192.168.122.70
+proxmox_node: pve
+proxmox_api_user: root@pam
+proxmox_api_token_id: terraform
+proxmox_api_token_secret: ENC[AES256_GCM,data:Imp3SjbIaoHz9NLcMNPGlJwHlCBa3yeRi8CsRS5iJBnfa+QO,iv:EwbLDAPXIFcuteMht6GHpIAD6Nu6HYal9queVIaJBO0=,tag:W7UMGjLO9+OyaFnZWpL/FA==,type:str]
+# SSH access to Proxmox host (for talosctl/kubectl/helm — VMs are on internal network)
+proxmox_ssh_host: 192.168.122.70
+proxmox_ssh_user: root
+# --- Talos ---
+talos_version: v1.12.4
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
+talos_install_disk: /dev/sda
+# --- Cluster ---
+cluster_name: fluodata
+cluster_vip: 10.10.0.5
+# --- Network ---
+vm_bridge: vmbr1
+vm_gateway: 10.10.0.1
+vm_subnet_mask: 24
+vm_nameservers:
+    - 10.10.0.1
+    - 1.1.1.1
+# --- VM defaults ---
+vm_storage: local-lvm
+talos_iso_storage: local
+# --- Nodes ---
+controlplane_nodes:
+    - name: cp-0
+      vmid: 110
+      ip: 10.10.0.10
+      mac: BC:24:11:01:01:01
+      cores: 2
+      memory: 4096
+      boot_disk_gb: 20
+    - name: cp-1
+      vmid: 111
+      ip: 10.10.0.11
+      mac: BC:24:11:01:01:02
+      cores: 2
+      memory: 4096
+      boot_disk_gb: 20
+worker_nodes:
+    - name: worker-0
+      vmid: 120
+      ip: 10.10.0.20
+      mac: BC:24:11:02:01:01
+      cores: 4
+      memory: 8192
+      boot_disk_gb: 20
+      longhorn_disk_gb: 20
+    - name: worker-1
+      vmid: 121
+      ip: 10.10.0.21
+      mac: BC:24:11:02:01:02
+      cores: 4
+      memory: 8192
+      boot_disk_gb: 20
+      longhorn_disk_gb: 20
+    - name: worker-2
+      vmid: 122
+      ip: 10.10.0.22
+      mac: BC:24:11:02:01:03
+      cores: 4
+      memory: 8192
+      boot_disk_gb: 20
+      longhorn_disk_gb: 20
+# --- Cilium ---
+cilium_version: 1.17.3
+sops:
+    kms: []
+    gcp_kms: []
+    azure_kv: []
+    hc_vault: []
+    age:
+        - recipient: age10xapwe62eqng7dhf4evrj3kswd7xqfna5t3lku7hz2gghy2j0etqsspzr5
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBLMjQ0WFAwYUVXclljNDhz
+            eDhqYWNCWm15VEF1b01DNnREdUpTWTV1L1RRCld5TCtpeDI4RmE4RFBmVXhUNlZa
+            cGt2T0w4T1ZYS2R3ekZKeWtsb3FUbWsKLS0tIFRHUHM5eEFtYlp2eC9IeXRsUkRJ
+            L0hLYmEzNlNBTXdtT3dFYTYzUWRHMlUK5xWzzl+xGiUdBM13ZZd14biuRDX17Xtn
+            n7gl9fWGzpm3lrqtYqhZIC9RjLX4BKh+IS4BLNEJHEE5AiA5NBo+XA==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-02-25T08:38:59Z"
+    mac: ENC[AES256_GCM,data:t/g3Sud3AGEv/he/WA2yKSjG5G1JBuwUcV4G9Qu6Wa6WAutXChmgEhRQjd9/7fdYVyTGi3uFTEWZ4kJLxv9t8yN7wX+WFjqTc2WOFRPE+KAIJUgaGFLKqfjTJkgVKqjZjjXUvlMR6+QsUPbbDff+cS/3qQFTr+6KHIosiFUsTdM=,iv:vgMZKUjEVhKBgNQ5BQFQF4RE2YNPMJduRyH78M0z3ow=,tag:TvfcFyeb3oGpQarITnJOMw==,type:str]
+    pgp: []
+    encrypted_regex: (rescue_ssh_pass|password|_secret$)
+    version: 3.9.4

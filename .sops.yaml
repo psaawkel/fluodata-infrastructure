@@ -1,0 +1,19 @@
+# SOPS configuration — defines encryption rules for secrets in this repo.
+#
+# Encrypt a file:   sops --encrypt --in-place <file>
+# Decrypt a file:   sops --decrypt --in-place <file>
+# Edit encrypted:   sops <file>
+#
+# The age private key must be at ~/.config/sops/age/keys.txt
+# See GITOPS.md for details.
+
+creation_rules:
+  # Ansible environment configs — encrypt only sensitive fields
+  - path_regex: environments/.*/config\.yml$
+    encrypted_regex: "(rescue_ssh_pass|password|_secret$)"
+    age: age10xapwe62eqng7dhf4evrj3kswd7xqfna5t3lku7hz2gghy2j0etqsspzr5
+
+  # Kubernetes secrets — encrypt data/stringData only
+  - path_regex: kubernetes/.*secret.*\.yaml$
+    encrypted_regex: "^(data|stringData)$"
+    age: age10xapwe62eqng7dhf4evrj3kswd7xqfna5t3lku7hz2gghy2j0etqsspzr5

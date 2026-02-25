@@ -1,0 +1,6 @@
+# Auto-detected from rescue mode on 2026-02-24T22:39:33Z
+gateway: "57.128.254.1"
+subnet_mask: 32
+nameservers:
+  - "213.186.33.99"
+install_disk: "/dev/sdb"

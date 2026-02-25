@@ -24,3 +24,4 @@
     - talos_bootstrap_vps
     - cilium
     - kubelet_cert_approver
+    - argocd

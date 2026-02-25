@@ -1,0 +1,85 @@
+# =============================================================================
+# Proxmox local VM environment — Talos dev cluster
+#
+# Deploy:
+#   cd ansible
+#   ansible-playbook proxmox-deploy.yml -e env=../environments/proxmox-local-vm
+#
+# Destroy:
+#   ansible-playbook proxmox-destroy.yml -e env=../environments/proxmox-local-vm
+# =============================================================================
+platform: proxmox
+# --- Proxmox connection ---
+proxmox_host: 192.168.122.70
+proxmox_node: pve
+proxmox_api_user: root@pam
+proxmox_api_token_id: terraform
+proxmox_api_token_secret: ENC[AES256_GCM,data:h+aD/0K4u3f1ADidkyGv3weUcI28Lh/pB3Xc9KIg/lz5oUjI,iv:C6tJM397LEADixOnLtRXkZN8RD0Ts3YtempJD6+oxyw=,tag:KDyx4CLRLYVL923J7IgU8A==,type:str]
+# SSH access to Proxmox host (for talosctl/kubectl/helm — VMs are on internal network)
+proxmox_ssh_host: 192.168.122.70
+proxmox_ssh_user: root
+# --- Talos ---
+talos_version: v1.12.4
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
+talos_install_disk: /dev/sda
+# --- Cluster ---
+cluster_name: fluodata
+cluster_vip: 10.10.0.5
+# --- Network ---
+vm_bridge: vmbr1
+vm_gateway: 10.10.0.1
+vm_subnet_mask: 24
+vm_nameservers:
+    - 10.10.0.1
+    - 1.1.1.1
+# --- VM defaults ---
+vm_storage: local-lvm
+talos_iso_storage: local
+# --- Nodes ---
+controlplane_nodes:
+    - name: cp-0
+      vmid: 110
+      ip: 10.10.0.10
+      mac: BC:24:11:01:01:01
+      cores: 2
+      memory: 4096
+      boot_disk_gb: 20
+worker_nodes:
+    - name: worker-0
+      vmid: 120
+      ip: 10.10.0.20
+      mac: BC:24:11:02:01:01
+      cores: 4
+      memory: 8192
+      boot_disk_gb: 20
+      longhorn_disk_gb: 20
+    - name: worker-1
+      vmid: 121
+      ip: 10.10.0.21
+      mac: BC:24:11:02:01:02
+      cores: 4
+      memory: 8192
+      boot_disk_gb: 20
+      longhorn_disk_gb: 20
+# --- Cilium ---
+cilium_version: 1.17.3
+sops:
+    kms: []
+    gcp_kms: []
+    azure_kv: []
+    hc_vault: []
+    age:
+        - recipient: age10xapwe62eqng7dhf4evrj3kswd7xqfna5t3lku7hz2gghy2j0etqsspzr5
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAvOVJvREg2N3hiT1hYcHV2
+            eFY4NXVWbE9CcHIyUjl6di9qQTM5MGdVRDNRCkE4cGRzSEVLUWtNSFF4SDd3OHVT
+            THA0eVcwdHVMYzdsbW1objRhUXQxdW8KLS0tIDhQZmNXTG1SYXptTmFQS01tTTQ1
+            M2VMN0ZNNVBrODVTS0JzUFVKTVdqTmMKNtsr3hQytroZGOh5ie6zj4eISYg2dUOB
+            IzOdnIHOFaWjpY23e803F8Awpg7CIfnbLM6dvzlt99Ez0oqfqeldxg==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-02-25T08:38:58Z"
+    mac: ENC[AES256_GCM,data:m1eJJ84vhT9nqbZsIVnFcRfH5jzJso7hjmL+wQsW3UmS7Ws0Y568Od2xU+7PGNl3sds3Oix6HkWdpJEuCjCrhIf6Y/ptibNMZ+QVJkoNBgxyYVbesc8FU7kZfF+EzWXCTZrBNe76qQDzy9k+8LCexMVzJk6BBfqKHxxpZ3RYZ7g=,iv:84WH8SMSHpL8HOM2DWSs9N45XQKoNnIuie5m0JChjRM=,tag:1PsW1HjN5rWMPrKnGfsX8A==,type:str]
+    pgp: []
+    encrypted_regex: (rescue_ssh_pass|password|_secret$)
+    version: 3.9.4

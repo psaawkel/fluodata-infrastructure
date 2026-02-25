@@ -28,3 +28,16 @@
     - proxmox_post_install
     - cilium
     - kubelet_cert_approver
+
+# --- Install ArgoCD (runs on localhost using fetched kubeconfig) ---
+- name: Install ArgoCD
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - ansible.builtin.include_tasks: tasks/load-config.yml
+    - ansible.builtin.include_tasks: tasks/validate-proxmox.yml
+    - name: Set kubeconfig path for ArgoCD
+      ansible.builtin.set_fact:
+        kubeconfig_path: "{{ env_dir }}/kubeconfig"
+  roles:
+    - argocd

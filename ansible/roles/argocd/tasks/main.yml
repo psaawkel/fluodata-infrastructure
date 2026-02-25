@@ -1,0 +1,192 @@
+---
+# =============================================================================
+# Role: argocd — Install ArgoCD with KSOPS (SOPS+age secret decryption)
+#
+# Installs ArgoCD via Helm with KSOPS integration for decrypting
+# SOPS-encrypted secrets during kustomize builds.
+#
+# Requires:
+#   - kubeconfig_path: set by the preceding bootstrap role
+#   - age_key_file: path to age private key (default: ~/.config/sops/age/keys.txt)
+#   - env_dir: environment directory (for deriving cluster path)
+#   - git_repo_url: git repo URL for ArgoCD to watch
+#
+# The age private key is stored as a Kubernetes Secret in the argocd namespace.
+# ArgoCD's repo-server uses this key to decrypt SOPS-encrypted resources.
+# =============================================================================
+
+- name: Resolve git repo URL
+  ansible.builtin.command:
+    cmd: git remote get-url origin
+  register: _git_remote
+  changed_when: false
+  args:
+    chdir: "{{ playbook_dir }}"
+
+- name: Set ArgoCD variables
+  ansible.builtin.set_fact:
+    _argocd_git_repo: "{{ git_repo_url | default(_git_remote.stdout) }}"
+    _argocd_cluster_dir: "{{ env_dir | basename }}"
+    _argocd_values_file: "{{ playbook_dir }}/../kubernetes/base/argocd/values.yaml"
+
+- name: Check age key file exists
+  ansible.builtin.stat:
+    path: "{{ age_key_file }}"
+  register: _age_key_stat
+
+- name: Fail if age key not found
+  ansible.builtin.fail:
+    msg: >-
+      Age private key not found at {{ age_key_file }}.
+      Generate one with: age-keygen -o ~/.config/sops/age/keys.txt
+  when: not _age_key_stat.stat.exists
+
+# --- Namespace ---
+- name: Create argocd namespace
+  ansible.builtin.command:
+    cmd: kubectl create namespace {{ argocd_namespace }}
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: _ns_result
+  changed_when: "'created' in _ns_result.stdout"
+  failed_when:
+    - _ns_result.rc != 0
+    - "'already exists' not in _ns_result.stderr"
+
+# --- Age key Secret for KSOPS ---
+- name: Read age private key
+  ansible.builtin.slurp:
+    src: "{{ age_key_file }}"
+  register: _age_key_content
+  no_log: true
+
+- name: Write age key to temp file
+  ansible.builtin.copy:
+    content: "{{ _age_key_content.content | b64decode }}"
+    dest: "{{ env_dir }}/.age-key-tmp"
+    mode: "0600"
+  no_log: true
+
+- name: Generate SOPS age key Secret manifest
+  ansible.builtin.command:
+    cmd: >-
+      kubectl create secret generic sops-age
+        --namespace {{ argocd_namespace }}
+        --from-file=keys.txt={{ env_dir }}/.age-key-tmp
+        --dry-run=client -o yaml
+  register: _age_secret_yaml
+  changed_when: false
+  no_log: true
+
+- name: Write SOPS age key Secret manifest
+  ansible.builtin.copy:
+    content: "{{ _age_secret_yaml.stdout }}"
+    dest: "{{ env_dir }}/.sops-age-secret.yaml"
+    mode: "0600"
+  no_log: true
+
+- name: Apply SOPS age key Secret
+  ansible.builtin.command:
+    cmd: kubectl apply -f {{ env_dir }}/.sops-age-secret.yaml
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: _age_apply
+  changed_when: "'created' in _age_apply.stdout or 'configured' in _age_apply.stdout"
+
+- name: Remove temp files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ env_dir }}/.age-key-tmp"
+    - "{{ env_dir }}/.sops-age-secret.yaml"
+
+# --- Helm install ---
+- name: Add ArgoCD Helm repo
+  ansible.builtin.command:
+    cmd: helm repo add argo https://argoproj.github.io/argo-helm
+  register: _helm_repo_result
+  changed_when: "'has been added' in _helm_repo_result.stdout"
+  failed_when:
+    - _helm_repo_result.rc != 0
+    - "'already exists' not in _helm_repo_result.stderr"
+
+- name: Update Helm repos
+  ansible.builtin.command:
+    cmd: helm repo update
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Install ArgoCD via Helm
+  ansible.builtin.command:
+    cmd: >-
+      helm upgrade --install argocd argo/argo-cd
+        --namespace {{ argocd_namespace }}
+        --version {{ argocd_chart_version }}
+        --values {{ _argocd_values_file }}
+        --wait
+        --timeout 10m
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: _argocd_install
+  changed_when: "'STATUS: deployed' in _argocd_install.stdout"
+
+# --- Wait for ArgoCD to be ready ---
+- name: Wait for ArgoCD server deployment
+  ansible.builtin.command:
+    cmd: >-
+      kubectl rollout status deployment/argocd-server
+        --namespace {{ argocd_namespace }}
+        --timeout=300s
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+# --- Get admin password ---
+- name: Get ArgoCD initial admin password
+  ansible.builtin.command:
+    cmd: >-
+      kubectl get secret argocd-initial-admin-secret
+        --namespace {{ argocd_namespace }}
+        -o jsonpath='{.data.password}'
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: _argocd_admin_pass_b64
+  changed_when: false
+
+- name: Decode admin password
+  ansible.builtin.set_fact:
+    _argocd_admin_password: "{{ _argocd_admin_pass_b64.stdout | b64decode }}"
+  no_log: true
+
+# --- Apply root Application (app-of-apps) ---
+- name: Generate root Application manifest
+  ansible.builtin.template:
+    src: root-app.yaml.j2
+    dest: "{{ env_dir }}/argocd-root-app.yaml"
+    mode: "0600"
+
+- name: Apply root Application
+  ansible.builtin.command:
+    cmd: kubectl apply -f {{ env_dir }}/argocd-root-app.yaml
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: _root_app_result
+  changed_when: "'created' in _root_app_result.stdout or 'configured' in _root_app_result.stdout"
+
+# --- Summary ---
+- name: Show ArgoCD access info
+  ansible.builtin.debug:
+    msg: |
+      ArgoCD installed successfully!
+
+      Dashboard access:
+        kubectl port-forward svc/argocd-server -n {{ argocd_namespace }} 8080:443 --kubeconfig {{ kubeconfig_path }}
+        Open: https://localhost:8080
+
+      Login:
+        Username: admin
+        Password: {{ _argocd_admin_password }}
+
+      Root application: {{ _argocd_cluster_dir }}
+      Watching: {{ _argocd_git_repo }} → kubernetes/clusters/{{ _argocd_cluster_dir }}/

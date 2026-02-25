@@ -23,6 +23,31 @@
     msg: "config.yml not found in {{ env_dir }}"
   when: not _config_stat.stat.exists
 
-- name: Load config.yml
+- name: Check if config.yml is SOPS-encrypted
+  ansible.builtin.command:
+    cmd: grep -q "^sops:" "{{ env_dir }}/config.yml"
+  register: _sops_check
+  changed_when: false
+  failed_when: false
+
+- name: Load config.yml (SOPS-encrypted)
+  when: _sops_check.rc == 0
+  block:
+    - name: Decrypt config.yml with SOPS
+      ansible.builtin.command:
+        cmd: sops --decrypt "{{ env_dir }}/config.yml"
+      register: _sops_decrypted
+      changed_when: false
+      no_log: true
+
+    - name: Parse decrypted config
+      ansible.builtin.set_fact: "{{ item.key }}={{ item.value }}"
+      loop: "{{ _sops_decrypted.stdout | from_yaml | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: true
+
+- name: Load config.yml (plaintext)
   ansible.builtin.include_vars:
     file: "{{ env_dir }}/config.yml"
+  when: _sops_check.rc != 0

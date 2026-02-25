@@ -20,12 +20,21 @@ override.tf.json
 **/talosconfig
 **/secrets.yaml
 
-# Environment folders — gitignored (contain secrets + generated files).
-# Only *-example/ folders are committed.
-environments/proxmox-*/
-environments/vps-*/
-!environments/proxmox-example/
-!environments/vps-example/
+# Environment folders — generated/runtime files are gitignored.
+# config.yml and node-facts-*.yml are SOPS-encrypted and safe to commit.
+environments/*/controlplane.yaml
+environments/*/worker.yaml
+environments/*/patch-*.yaml
+environments/*/*.txt
+environments/*/kubelet-serving-cert-approver.yaml
+environments/*/argocd-root-app.yaml
+
+# Example environments (always committed, never encrypted)
+# Real environments: config.yml is SOPS-encrypted, committed to git.
+
+# Age private key — NEVER commit this
+*.agekey
+keys.txt
 
 # OS
 .DS_Store

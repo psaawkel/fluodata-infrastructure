@@ -1,0 +1,60 @@
+# =============================================================================
+# VPS OVH test1 — 3-node Talos cluster (all CP + worker)
+#
+# Rescue install (first time):
+#   cd ansible
+#   ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-ovh-test1
+#   # Then: OVH dashboard → exit rescue mode → reboot each VPS
+#
+# Deploy (bootstrap + Cilium):
+#   ansible-playbook vps-deploy.yml -e env=../environments/vps-ovh-test1
+#
+# Apply config changes (no bootstrap, no Cilium):
+#   ansible-playbook vps-apply.yml -e env=../environments/vps-ovh-test1
+# =============================================================================
+platform: vps
+# --- Talos ---
+talos_version: v1.12.4
+# Schematic with extensions: iscsi-tools, util-linux-tools, qemu-guest-agent
+talos_schematic_id: e187c9b90f773cd8c84e5a3265c5554ee787b2fe67b508d9f955e90e7ae8c96c
+# --- Cluster ---
+cluster_name: fluodata
+# --- Nodes ---
+# Network settings (gateway, subnet_mask, nameservers, install_disk) are
+# auto-detected from rescue mode and saved to node-facts-<name>.yml.
+# To override any detected value, add it to the node definition here.
+nodes:
+    - name: cp-0
+      role: cpworker
+      host: 57.128.255.64
+      rescue_ssh_pass: ENC[AES256_GCM,data:9g0+XYKNGRnHICPm,iv:BMeMqKrOjF8P/U6LYw/YeCI1aKO/IPLnGwH8fXOC0zE=,tag:tPz3ayTNWw0JK6YHcTyONQ==,type:str]
+    - name: cp-1
+      role: cpworker
+      host: 51.83.162.165
+      rescue_ssh_pass: ENC[AES256_GCM,data:FOOqHdj4X9+gISkc,iv:BbpS9PZ33BxAJl4/U3X+tiKEsDJnSPdU/jZONImYafM=,tag:KuLB/1YC/RmEn2gyhfYdmg==,type:str]
+    - name: cp-2
+      role: cpworker
+      host: 51.83.162.166
+      rescue_ssh_pass: ENC[AES256_GCM,data:8AotY9k+MGsjcdj6,iv:yf51SPu/sExbSrATOoVLtDUlTlcWT4rnn42NiXLi/hA=,tag:SZF85YxfqaySOMrqPw/9NQ==,type:str]
+# --- Cilium ---
+cilium_version: 1.17.3
+sops:
+    kms: []
+    gcp_kms: []
+    azure_kv: []
+    hc_vault: []
+    age:
+        - recipient: age10xapwe62eqng7dhf4evrj3kswd7xqfna5t3lku7hz2gghy2j0etqsspzr5
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBmaTg4akNYMFBFSHNudjMw
+            WWZPRktvVFpzMWl0M0FHSDlEVGZ1OXBuNXljCjA5VXcvVm5STVdIV2RiOFpVcDBu
+            ZmRBWXNUWFFLUFFHRHg3dWFOUklDSFkKLS0tIGxFQjIxSloxVXJwUENValFNTmNm
+            c2dLOXRaV0VTWWtNQWZsN1pHT2xMY2cKcC+P1irYzN9XEPJtxSLYf5PBhBhVWNgL
+            wIV6Y506Q82Y37K1BqninkEzvanNFRX/0K9hYPdJKfyz1bXWGZSQZA==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-02-25T08:39:10Z"
+    mac: ENC[AES256_GCM,data:IixO1c+HLnRoi7SsG9SZgi2J7F4NiAOhfgoRKFvjzqXs9yIXv/5GSzjyVNNjIBqaVkETnO8+ZfWthW2VpYfWwvIte75R9Kzogo2bXnn5ppyVmT/8Ci7TaTVRJqE1UqmWwoXYtd196XaOQGrEijxB/7f0rySZ4ZGWRVw9lm1A5XM=,iv:Dl+tmK/4U+8JABbQMEDDiBPxVQa8CGDjzEZ5sRb8cSs=,tag:0R8PA3dBJJYasIil11NIlA==,type:str]
+    pgp: []
+    encrypted_regex: (rescue_ssh_pass|password|_secret$)
+    version: 3.9.4
