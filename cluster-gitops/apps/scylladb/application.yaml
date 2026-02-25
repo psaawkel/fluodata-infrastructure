@@ -1,0 +1,60 @@
+# ScyllaDB Operator + ScyllaDB cluster instance.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: scylla-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: https://scylla-operator-charts.storage.googleapis.com/stable
+    chart: scylla-operator
+    targetRevision: "1.14.0"
+    helm:
+      valuesObject: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: scylla-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+# ScyllaDB cluster instance
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: scylladb
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/psaawkel/fluodata-infrastructure.git
+    targetRevision: master
+    path: cluster-gitops/apps/scylladb
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fluodata
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

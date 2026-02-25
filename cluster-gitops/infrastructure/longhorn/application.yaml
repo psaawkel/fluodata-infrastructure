@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: longhorn
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  source:
+    repoURL: https://charts.longhorn.io
+    chart: longhorn
+    targetRevision: "1.8.0"
+    helm:
+      valuesObject:
+        # Talos: kubelet runs as container, must set root dir explicitly
+        csi:
+          kubeletRootDir: /var/lib/kubelet
+
+        defaultSettings:
+          # Single-host Phase 1: 1 replica. Phase 3 HA: increase to match failure domains.
+          defaultReplicaCount: 1
+          # Default data path on workers (matches Talos disk mount)
+          defaultDataPath: /var/lib/longhorn
+
+        persistence:
+          defaultClassReplicaCount: 1
+
+        # Longhorn UI (access via port-forward)
+        ingress:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: longhorn-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

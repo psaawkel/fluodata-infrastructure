@@ -1,0 +1,55 @@
+# ============================================================
+# Example: Local laptop Proxmox (Phase 1)
+# ============================================================
+# Copy to terraform.tfvars and adjust values.
+
+proxmox_api_url          = "https://192.168.1.100:8006/api2/json"
+proxmox_api_token_id     = "root@pam!terraform"
+proxmox_api_token_secret = "CHANGEME"
+proxmox_node             = "pve"
+
+cluster_name     = "fluodata"
+cluster_endpoint = "https://10.10.0.10:6443"
+
+# Git repo for Argo CD
+gitops_repo_url        = "https://github.com/psaawkel/fluodata-infrastructure.git"
+gitops_target_revision = "master"
+
+# SOPS age key for secret decryption (optional — generate with: age-keygen -o age.key)
+# sops_age_key_file = "/path/to/age.key"
+
+# Phase 1: minimal topology (1 CP + 2 workers)
+controlplane_nodes = [
+  {
+    name      = "talos-cp-1"
+    vmid      = 100
+    ip        = "10.10.0.10"
+    mac       = "BC:24:11:00:01:10"
+    cores     = 2
+    memory    = 8192
+    disk_size = 20
+  }
+]
+
+worker_nodes = [
+  {
+    name          = "talos-worker-1"
+    vmid          = 110
+    ip            = "10.10.0.20"
+    mac           = "BC:24:11:00:01:20"
+    cores         = 4
+    memory        = 12288
+    disk_size     = 20
+    longhorn_disk = 80
+  },
+  {
+    name          = "talos-worker-2"
+    vmid          = 111
+    ip            = "10.10.0.21"
+    mac           = "BC:24:11:00:01:21"
+    cores         = 4
+    memory        = 12288
+    disk_size     = 20
+    longhorn_disk = 80
+  }
+]

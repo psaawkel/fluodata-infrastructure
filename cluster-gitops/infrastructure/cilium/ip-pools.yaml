@@ -1,0 +1,32 @@
+# Cilium L2 announcement policy + IP pool for LoadBalancer services.
+# Applied after Cilium is running.
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: default-l2-policy
+spec:
+  interfaces:
+    - ^eth[0-9]+
+  externalIPs: true
+  loadBalancerIPs: true
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: ingress-pool
+spec:
+  blocks:
+    - start: "10.10.0.100"
+      stop: "10.10.0.110"
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: mqtt-pool
+spec:
+  blocks:
+    - start: "10.10.0.120"
+      stop: "10.10.0.120"
+  serviceSelector:
+    matchLabels:
+      app: mqtt

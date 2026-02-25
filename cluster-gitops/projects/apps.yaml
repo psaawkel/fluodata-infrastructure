@@ -1,0 +1,28 @@
+# Argo CD Project: apps
+# Groups all application-level components (databases, message brokers, etc.)
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Application components (databases, brokers, workloads)
+  sourceRepos:
+    - "*"
+  destinations:
+    - namespace: fluodata
+      server: https://kubernetes.default.svc
+    - namespace: cnpg-system
+      server: https://kubernetes.default.svc
+    - namespace: scylla-operator
+      server: https://kubernetes.default.svc
+    - namespace: rabbitmq-system
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

@@ -1,0 +1,31 @@
+# cert-manager ClusterIssuers - separate Application so it syncs after cert-manager CRDs are ready.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-issuers
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  source:
+    repoURL: https://github.com/psaawkel/fluodata-infrastructure.git
+    targetRevision: master
+    path: cluster-gitops/infrastructure/cert-manager
+    directory:
+      include: "cluster-issuers.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

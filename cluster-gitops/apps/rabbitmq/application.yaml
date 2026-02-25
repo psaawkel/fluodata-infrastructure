@@ -1,0 +1,102 @@
+# RabbitMQ Cluster Operator installation.
+# The operator is installed from the official release manifest.
+# This file is a local copy of the operator CRDs + deployment.
+# To update: download from https://github.com/rabbitmq/cluster-operator/releases
+#
+# For Argo CD, we point to the operator's Helm chart from OCI registry.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: registry-1.docker.io/bitnamicharts
+    chart: rabbitmq-cluster-operator
+    targetRevision: "4.4.34"
+    helm:
+      valuesObject:
+        # Only install the operator, not a RabbitMQ instance
+        # Override Bitnami images with official RabbitMQ ones (Bitnami purged theirs from Docker Hub)
+        global:
+          security:
+            allowInsecureImages: true
+        clusterOperator:
+          image:
+            registry: docker.io
+            repository: rabbitmqoperator/cluster-operator
+            tag: "2.16.0"
+          command:
+            - /manager
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+        msgTopologyOperator:
+          image:
+            registry: docker.io
+            repository: rabbitmqoperator/messaging-topology-operator
+            tag: "1.17.0"
+          command:
+            - /manager
+        credentialUpdaterImage:
+          registry: docker.io
+          repository: rabbitmqoperator/default-user-credential-updater
+          tag: "1.0.4"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rabbitmq-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+# RabbitMQ cluster instance
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/psaawkel/fluodata-infrastructure.git
+    targetRevision: master
+    path: cluster-gitops/apps/rabbitmq
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fluodata
+  ignoreDifferences:
+    - group: rabbitmq.com
+      kind: RabbitmqCluster
+      jsonPointers:
+        - /spec
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

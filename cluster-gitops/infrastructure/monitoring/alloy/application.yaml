@@ -1,0 +1,99 @@
+# Grafana Alloy — log collection agent (replaces deprecated Promtail).
+# Ships logs to Loki for centralized log aggregation.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: "0.12.0"
+    helm:
+      valuesObject:
+        alloy:
+          configMap:
+            content: |
+              // Discover all pods on the node
+              discovery.kubernetes "pods" {
+                role = "pod"
+              }
+
+              // Relabel to extract standard metadata
+              discovery.relabel "pods" {
+                targets = discovery.kubernetes.pods.targets
+
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  target_label  = "namespace"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  target_label  = "pod"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  target_label  = "container"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_node_name"]
+                  target_label  = "node"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
+                  separator     = "/"
+                  target_label  = "job"
+                }
+              }
+
+              // Collect logs from discovered pods
+              loki.source.kubernetes "pods" {
+                targets    = discovery.relabel.pods.output
+                forward_to = [loki.write.default.receiver]
+              }
+
+              // Ship logs to Loki
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki-gateway.logging.svc.cluster.local/loki/api/v1/push"
+
+                  batch_wait    = "1s"
+                  batch_size    = "1MiB"
+                }
+                external_labels = {
+                  cluster = "fluodata",
+                }
+              }
+
+        controller:
+          type: daemonset
+
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+        tolerations:
+          - effect: NoSchedule
+            operator: Exists
+
+        serviceMonitor:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

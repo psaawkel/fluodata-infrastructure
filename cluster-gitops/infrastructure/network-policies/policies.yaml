@@ -1,0 +1,529 @@
+# NetworkPolicies for all application namespaces.
+# These implement a default-deny + allow-list approach per REQUIREMENTS.md.
+#
+# Policy overview:
+#   - Default deny all ingress in each namespace
+#   - Allow intra-namespace communication
+#   - Allow ingress controller -> app pods
+#   - Allow monitoring scraping (VictoriaMetrics VMAgent)
+#   - Allow DNS resolution (kube-system/CoreDNS)
+#   - Allow app -> database/broker connections
+---
+# ============================================================
+# fluodata namespace
+# ============================================================
+
+# Default deny all ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow intra-namespace traffic (pods within fluodata can talk to each other)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Allow ingress-nginx -> fluodata pods (HTTP traffic from ingress controller)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-ingress
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+---
+# Allow monitoring scraping (VMAgent -> app pods metrics endpoints)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-monitoring
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+---
+# Allow MQTT external traffic to RabbitMQ (LoadBalancer service)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mqtt-external
+  namespace: fluodata
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 1883
+---
+# Allow CNPG operator (cnpg-system ns) -> PostgreSQL pods for health checks
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-cnpg-operator
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+---
+# Allow scylla-operator -> ScyllaDB pods for cluster management
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-scylla-operator
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: scylla-operator
+---
+# Allow RabbitMQ cluster operator -> RabbitMQ pods for management
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-rabbitmq-operator
+  namespace: fluodata
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rabbitmq-system
+---
+# ============================================================
+# cnpg-system namespace
+# ============================================================
+
+# Allow kube-apiserver to reach CNPG operator webhook.
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: cnpg-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudnative-pg
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+---
+# ============================================================
+# scylla-operator namespace
+# ============================================================
+
+# Allow kube-apiserver to reach scylla-operator webhook.
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: scylla-operator
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: webhook-server
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+---
+# ============================================================
+# longhorn-system namespace
+# ============================================================
+
+# Default deny ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: longhorn-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow intra-namespace (Longhorn components communicate heavily)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: longhorn-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Allow monitoring scraping
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-monitoring
+  namespace: longhorn-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+---
+# Allow all namespaces to reach Longhorn CSI (storage provisioning)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-csi-from-all
+  namespace: longhorn-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+---
+# Allow kube-apiserver to reach Longhorn admission webhook.
+# Uses CiliumNetworkPolicy with fromEntities because standard K8s NetworkPolicy
+# ipBlock rules don't match Cilium's "remote-node" identity in VXLAN mode.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: longhorn-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app: longhorn-manager
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9502"
+              protocol: TCP
+---
+# ============================================================
+# monitoring namespace
+# ============================================================
+
+# Default deny ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow intra-namespace (Grafana -> VMSingle, VMAgent -> VMSingle, etc.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Allow ingress-nginx -> Grafana (dashboard access)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-ingress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+---
+# Allow VMAgent to scrape all namespaces (VMAgent pods need to reach
+# target pods for metrics collection — targets connect back to VMAgent)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-scrape-targets
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+---
+# Allow kube-apiserver to reach VictoriaMetrics operator webhook.
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: victoria-metrics-stack
+      app.kubernetes.io/name: victoria-metrics-operator
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+---
+# ============================================================
+# logging namespace
+# ============================================================
+
+# Default deny ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: logging
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow intra-namespace (Promtail -> Loki)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: logging
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Allow Grafana (monitoring ns) -> Loki (logging ns) for log queries
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-monitoring
+  namespace: logging
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+---
+# ============================================================
+# ingress-nginx namespace
+# ============================================================
+
+# Default deny ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: ingress-nginx
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow external traffic to ingress controller (HTTP/HTTPS)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-http
+  namespace: ingress-nginx
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+---
+# Allow kube-apiserver to reach ingress-nginx admission webhook.
+# Uses CiliumNetworkPolicy with fromEntities for Cilium remote-node identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: ingress-nginx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+---
+# Allow monitoring scraping
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-monitoring
+  namespace: ingress-nginx
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+---
+# ============================================================
+# cert-manager namespace
+# ============================================================
+
+# Default deny ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow intra-namespace (cert-manager components)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Allow monitoring scraping
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-monitoring
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+---
+# Allow kube-apiserver to reach cert-manager webhook for admission validation.
+# IMPORTANT: Standard K8s NetworkPolicy ipBlock rules do NOT match Cilium's
+# "remote-node" identity. When the API server (host network) calls a webhook pod
+# on a different node via VXLAN, Cilium assigns the "remote-node" reserved identity
+# to those packets. ipBlock CIDR rules only match "world"/"CIDR" identities.
+# Therefore we MUST use CiliumNetworkPolicy with fromEntities to allow this traffic.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-apiserver-webhook
+  namespace: cert-manager
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: webhook
+  ingress:
+    - fromEntities:
+        - remote-node
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "10250"
+              protocol: TCP

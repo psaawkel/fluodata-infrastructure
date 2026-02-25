@@ -1,0 +1,41 @@
+# Kubelet CSR Approver — auto-approves kubelet-serving certificate requests.
+# Talos generates these CSRs but Kubernetes does not auto-approve them.
+# Without this, kubectl logs/exec and Longhorn will break when certs rotate.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubelet-csr-approver
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  source:
+    repoURL: https://postfinance.github.io/kubelet-csr-approver
+    chart: kubelet-csr-approver
+    targetRevision: "1.2.6"
+    helm:
+      valuesObject:
+        # Only approve CSRs from nodes in this IP range
+        providerIpPrefixes:
+          - "10.10.0.0/24"
+        # Allow CSRs where the requested DNS name matches the node name
+        bypassDnsResolution: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
