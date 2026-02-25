@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: scylla-operator-crds
+  namespace: argocd
+  annotations:
+    # ensure CRDs sync before operator/controller (low number = earlier)
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:psaawkel/fluodata-infrastructure.git
+    targetRevision: opencode-opus
+    path: kubernetes/clusters/vps-ovh-test1/apps/scylla/operator/upstream/bundle/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
