@@ -148,6 +148,13 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
+  # Ignore bound PVC fields that are immutable and cause Replace to fail
+  ignoreDifferences:
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec/volumeName
+        - /spec/volumeMode
   syncPolicy:
     automated:
       prune: true
