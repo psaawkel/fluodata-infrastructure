@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: git@github.com:psaawkel/fluodata-infrastructure.git
     targetRevision: HEAD
-    path: kubernetes/base/postgresql
+    path: kubernetes/overlays/vps-ovh-test1/postgresql
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg

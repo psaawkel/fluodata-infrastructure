@@ -4,18 +4,13 @@ metadata:
   name: scylla
   namespace: scylla
 spec:
-  version: "5.4"
-  agentVersion: "3.3.0"
-  # Required on Talos: immutable OS cannot satisfy ScyllaDB kernel tuning
-  developerMode: true
   datacenter:
-    name: dc1
     racks:
       - name: rack1
-        members: 1
+        members: 3
         storage:
           storageClassName: local-path
-          capacity: 5Gi
+          capacity: 15Gi
         resources:
           requests:
             cpu: 250m
