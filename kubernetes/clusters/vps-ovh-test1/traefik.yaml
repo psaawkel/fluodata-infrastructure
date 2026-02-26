@@ -44,8 +44,6 @@ spec:
               default: true
             exposedPort: 80
             protocol: TCP
-            redirectTo:
-              port: websecure
 
           # HTTPS (port 443) — future web services
           websecure:
