@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dynhost-failover
+  namespace: kube-system
+  labels:
+    app: dynhost-failover
+spec:
+  selector:
+    matchLabels:
+      app: dynhost-failover
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: dynhost-failover
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: failover
+          image: alpine:3.21
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              apk add --no-cache curl >/dev/null 2>&1
+              echo "$(date '+%Y-%m-%d %H:%M:%S') Starting dynhost-failover (interval: ${CHECK_INTERVAL}s)"
+              while true; do
+                /bin/sh /scripts/failover.sh || true
+                sleep "$CHECK_INTERVAL"
+              done
+          envFrom:
+            - secretRef:
+                name: dynhost-failover-config
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+      volumes:
+        - name: scripts
+          configMap:
+            name: dynhost-failover-script
+            defaultMode: 0755

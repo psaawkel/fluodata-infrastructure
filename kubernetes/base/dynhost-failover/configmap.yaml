@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynhost-failover-script
+  namespace: kube-system
+data:
+  failover.sh: |
+    #!/bin/sh
+    set -e
+
+    log() {
+      echo "$(date '+%Y-%m-%d %H:%M:%S') $1"
+    }
+
+    check_health() {
+      url=$(echo "$HEALTH_URL_TEMPLATE" | sed "s/__IP__/$1/")
+      result=$(curl -sk --max-time 5 "$url" 2>/dev/null) || return 1
+      echo "$result" | grep -q "ok"
+    }
+
+    resolve_dns() {
+      nslookup "$DYNHOST_HOSTNAME" dns.ovh.net 2>/dev/null | \
+        awk '/^Address:/ && !/dns\.ovh\.net/ {print $2}' | \
+        tail -1
+    }
+
+    update_dns() {
+      TARGET_IP="$1"
+      log "UPDATE: $DYNHOST_HOSTNAME $CURRENT_IP -> $TARGET_IP"
+      RESULT=$(curl -s --max-time 10 -u "${DYNHOST_USER}:${DYNHOST_PASS}" \
+        "https://www.ovh.com/nic/update?system=dyndns&hostname=${DYNHOST_HOSTNAME}&myip=${TARGET_IP}")
+      log "DynHost response: $RESULT"
+    }
+
+    CURRENT_IP=$(resolve_dns)
+    if [ -z "$CURRENT_IP" ]; then
+      log "WARN: Could not resolve $DYNHOST_HOSTNAME"
+    fi
+
+    # --- Test rotate mode ---
+    # When TEST_ROTATE_INTERVAL > 0, cycle through nodes ignoring health.
+    # Uses a shared state file so all DaemonSet pods agree on timing.
+    ROTATE="${TEST_ROTATE_INTERVAL:-0}"
+    if [ "$ROTATE" != "0" ] && [ -n "$ROTATE" ]; then
+      # Build ordered IP list
+      NODE_IPS=""
+      NODE_COUNT=0
+      OLD_IFS="$IFS"
+      IFS=','
+      for entry in $NODES; do
+        IFS="$OLD_IFS"
+        ip="${entry#*:}"
+        NODE_IPS="${NODE_IPS}${NODE_IPS:+ }${ip}"
+        NODE_COUNT=$((NODE_COUNT + 1))
+      done
+      IFS="$OLD_IFS"
+
+      # Pick node based on time: epoch / interval mod node_count
+      EPOCH=$(date +%s)
+      INDEX=$(( (EPOCH / ROTATE) % NODE_COUNT ))
+      I=0
+      TARGET=""
+      for ip in $NODE_IPS; do
+        if [ "$I" -eq "$INDEX" ]; then
+          TARGET="$ip"
+          break
+        fi
+        I=$((I + 1))
+      done
+
+      if [ "$CURRENT_IP" != "$TARGET" ]; then
+        log "TEST ROTATE: slot=$INDEX target=$TARGET"
+        update_dns "$TARGET"
+      else
+        log "TEST ROTATE: OK slot=$INDEX -> $TARGET"
+      fi
+      exit 0
+    fi
+
+    # --- Normal failover mode ---
+    BEST_IP=""
+    OLD_IFS="$IFS"
+    IFS=','
+    for entry in $NODES; do
+      IFS="$OLD_IFS"
+      ip="${entry#*:}"
+      if check_health "$ip"; then
+        BEST_IP="$ip"
+        break
+      else
+        log "WARN: Node $ip is unhealthy"
+      fi
+    done
+    IFS="$OLD_IFS"
+
+    if [ -z "$BEST_IP" ]; then
+      log "CRIT: No healthy node found — keeping current DNS ($CURRENT_IP)"
+      exit 0
+    fi
+
+    if [ "$CURRENT_IP" != "$BEST_IP" ]; then
+      update_dns "$BEST_IP"
+    else
+      log "OK: $DYNHOST_HOSTNAME -> $BEST_IP"
+    fi
