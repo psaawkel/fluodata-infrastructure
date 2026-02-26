@@ -91,6 +91,23 @@ spec:
               default: false
             protocol: TCP
 
+        # --- Security (needed for hostNetwork + privileged ports 80/443) ---
+        securityContext:
+          capabilities:
+            add:
+              - NET_BIND_SERVICE
+            drop:
+              - ALL
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+
+        podSecurityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+
         # --- Service ---
         service:
           enabled: true
