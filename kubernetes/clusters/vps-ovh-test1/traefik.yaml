@@ -22,6 +22,10 @@ spec:
           kind: DaemonSet
           dnsPolicy: ClusterFirstWithHostNet
 
+        updateStrategy:
+          rollingUpdate:
+            maxUnavailable: 1
+
         # --- IngressClass ---
         ingressClass:
           enabled: true
