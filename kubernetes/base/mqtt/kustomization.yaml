@@ -4,6 +4,7 @@ resources:
   - clusterissuer.yaml
   - certificate.yaml
   - configmap.yaml
+  - secret-passwd.yaml
   - deployment.yaml
   - service.yaml
   - ingressroutetcp-mqtt.yaml

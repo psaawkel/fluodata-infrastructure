@@ -41,6 +41,9 @@ spec:
             - name: tls
               mountPath: /mosquitto/certs
               readOnly: true
+            - name: passwd
+              mountPath: /mosquitto/passwd
+              readOnly: true
           resources:
             requests:
               cpu: 50m
@@ -107,3 +110,6 @@ spec:
           secret:
             secretName: mqtt-tls
             optional: true   # Pod starts even if cert isn't issued yet (plain MQTT works)
+        - name: passwd
+          secret:
+            secretName: mosquitto-passwd

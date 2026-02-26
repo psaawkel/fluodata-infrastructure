@@ -1,5 +1,6 @@
 # Mosquitto configuration.
-# - Listener on 1883: plain MQTT, no auth (add auth plugin/password_file as needed).
+# - Both listeners require username/password authentication.
+# - Listener on 1883: plain MQTT.
 # - Listener on 8883: MQTTS with TLS termination using cert-manager certs.
 apiVersion: v1
 kind: ConfigMap
@@ -9,19 +10,21 @@ metadata:
 data:
   mosquitto.conf: |
     # --- Global ---
-    per_listener_settings true
+    per_listener_settings false
     persistence false
     log_dest stdout
     log_type all
 
+    # --- Authentication ---
+    password_file /mosquitto/passwd/passwd
+    allow_anonymous false
+
     # --- Plain MQTT (port 1883) ---
     listener 1883
     protocol mqtt
-    allow_anonymous true
 
     # --- MQTTS (port 8883) — TLS termination ---
     listener 8883
     protocol mqtt
     certfile /mosquitto/certs/tls.crt
     keyfile /mosquitto/certs/tls.key
-    allow_anonymous true
