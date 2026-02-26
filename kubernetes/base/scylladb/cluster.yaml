@@ -11,18 +11,6 @@ spec:
   datacenter:
     name: dc1
     racks:
-      - name: rack1
-        members: 0
-        storage:
-          storageClassName: local-path
-          capacity: 10Gi
-        resources:
-          requests:
-            cpu: 250m
-            memory: 512Mi
-          limits:
-            cpu: "1"
-            memory: 1Gi
       - name: rack2
         members: 3
         storage:
