@@ -1,0 +1,109 @@
+# Eclipse Mosquitto MQTT broker.
+# Single replica, no hostNetwork — Traefik handles external exposure.
+# The cert-reload sidecar watches for TLS cert changes and sends SIGHUP
+# to Mosquitto to reload certificates without downtime.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto
+  namespace: mqtt
+  labels:
+    app: mosquitto
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mosquitto
+  template:
+    metadata:
+      labels:
+        app: mosquitto
+    spec:
+      # Mosquitto runs as UID 1883 by default.
+      shareProcessNamespace: true   # Sidecar needs to signal Mosquitto via kill.
+      containers:
+        # --- Mosquitto broker ---
+        - name: mosquitto
+          image: eclipse-mosquitto:2.0
+          ports:
+            - name: mqtt
+              containerPort: 1883
+              protocol: TCP
+            - name: mqtts
+              containerPort: 8883
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /mosquitto/config
+              readOnly: true
+            - name: tls
+              mountPath: /mosquitto/certs
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 3
+            periodSeconds: 10
+
+        # --- Cert-reload sidecar ---
+        # Watches /certs for changes (cert-manager updates the Secret on renewal)
+        # and sends SIGHUP to the Mosquitto process to reload TLS certificates.
+        - name: cert-reload
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              # Record initial checksum of the cert file.
+              CHECKSUM=$(md5sum /certs/tls.crt 2>/dev/null | cut -d' ' -f1)
+              echo "Initial cert checksum: $CHECKSUM"
+              while true; do
+                sleep 30
+                NEW_CHECKSUM=$(md5sum /certs/tls.crt 2>/dev/null | cut -d' ' -f1)
+                if [ "$NEW_CHECKSUM" != "$CHECKSUM" ] && [ -n "$NEW_CHECKSUM" ]; then
+                  echo "Certificate changed, sending SIGHUP to mosquitto"
+                  # Find mosquitto PID (shareProcessNamespace is enabled).
+                  MQTT_PID=$(pgrep -x mosquitto | head -1)
+                  if [ -n "$MQTT_PID" ]; then
+                    kill -HUP "$MQTT_PID"
+                    echo "SIGHUP sent to PID $MQTT_PID"
+                  else
+                    echo "WARNING: mosquitto process not found"
+                  fi
+                  CHECKSUM="$NEW_CHECKSUM"
+                fi
+              done
+          volumeMounts:
+            - name: tls
+              mountPath: /certs
+              readOnly: true
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 10m
+              memory: 16Mi
+
+      volumes:
+        - name: config
+          configMap:
+            name: mosquitto-config
+        - name: tls
+          secret:
+            secretName: mqtt-tls
+            optional: true   # Pod starts even if cert isn't issued yet (plain MQTT works)

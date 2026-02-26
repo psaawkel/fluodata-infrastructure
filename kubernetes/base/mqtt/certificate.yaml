@@ -1,0 +1,15 @@
+# TLS certificate for the MQTT broker, issued by Let's Encrypt.
+# cert-manager auto-renews ~30 days before expiry.
+# The Secret is mounted into Mosquitto for TLS termination.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mqtt-tls
+  namespace: mqtt
+spec:
+  secretName: mqtt-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - cloud.fluodata.pl

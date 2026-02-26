@@ -4,3 +4,5 @@ resources:
   - local-path-storage.yaml
   - monitoring.yaml
   - logging.yaml
+  - traefik.yaml
+  - mqtt.yaml

@@ -1,0 +1,5 @@
+# mqtt namespace — Eclipse Mosquitto MQTT broker.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mqtt

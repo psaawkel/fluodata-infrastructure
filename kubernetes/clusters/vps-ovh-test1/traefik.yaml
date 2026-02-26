@@ -1,0 +1,124 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://traefik.github.io/charts
+    chart: traefik
+    targetRevision: "39.0.2"
+    helm:
+      valuesObject:
+        # --- Network ---
+        hostNetwork: true
+
+        deployment:
+          kind: DaemonSet
+          dnsPolicy: ClusterFirstWithHostNet
+
+        # --- IngressClass ---
+        ingressClass:
+          enabled: true
+          isDefaultClass: true
+
+        # --- Providers ---
+        providers:
+          kubernetesCRD:
+            enabled: true
+            allowCrossNamespace: true   # IngressRouteTCP in mqtt ns → mqtt service
+          kubernetesIngress:
+            enabled: true               # Required for cert-manager HTTP-01 challenges
+
+        # --- Entrypoints ---
+        ports:
+          # HTTP (port 80) — ACME challenges + redirect to HTTPS
+          web:
+            port: 80
+            expose:
+              default: true
+            exposedPort: 80
+            protocol: TCP
+            redirectTo:
+              port: websecure
+
+          # HTTPS (port 443) — future web services
+          websecure:
+            port: 443
+            expose:
+              default: true
+            exposedPort: 443
+            protocol: TCP
+            http:
+              tls:
+                enabled: true
+
+          # MQTT plain (port 1883)
+          mqtt:
+            port: 1883
+            expose:
+              default: true
+            exposedPort: 1883
+            protocol: TCP
+
+          # MQTTS (port 8883) — TLS passthrough to Mosquitto
+          mqtts:
+            port: 8883
+            expose:
+              default: true
+            exposedPort: 8883
+            protocol: TCP
+
+          # Dashboard — internal only
+          traefik:
+            port: 8080
+            expose:
+              default: false
+            protocol: TCP
+
+          # Metrics — internal only, port 9100
+          metrics:
+            port: 9100
+            expose:
+              default: false
+            protocol: TCP
+
+        # --- Service ---
+        service:
+          enabled: true
+          type: ClusterIP
+
+        # --- Resources ---
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 300m
+            memory: 128Mi
+
+        # --- Logging ---
+        logs:
+          general:
+            level: INFO
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

@@ -1,0 +1,9 @@
+# traefik namespace — Traefik ingress controller.
+# DaemonSet with hostNetwork needs privileged PodSecurity.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
