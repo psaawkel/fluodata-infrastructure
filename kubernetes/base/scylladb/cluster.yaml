@@ -24,7 +24,7 @@ spec:
             cpu: "1"
             memory: 1Gi
       - name: rack2
-        members: 2
+        members: 3
         storage:
           storageClassName: local-path
           capacity: 15Gi
