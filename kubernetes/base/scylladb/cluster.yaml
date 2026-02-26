@@ -12,7 +12,7 @@ spec:
     name: dc1
     racks:
       - name: rack1
-        members: 3
+        members: 2
         storage:
           storageClassName: local-path
           capacity: 10Gi
