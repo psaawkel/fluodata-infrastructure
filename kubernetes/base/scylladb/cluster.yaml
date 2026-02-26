@@ -12,7 +12,7 @@ spec:
     name: dc1
     racks:
       - name: rack1
-        members: 2
+        members: 1
         storage:
           storageClassName: local-path
           capacity: 10Gi
@@ -24,7 +24,7 @@ spec:
             cpu: "1"
             memory: 1Gi
       - name: rack2
-        members: 1
+        members: 2
         storage:
           storageClassName: local-path
           capacity: 15Gi
