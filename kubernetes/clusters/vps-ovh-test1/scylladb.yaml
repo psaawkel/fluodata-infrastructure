@@ -16,6 +16,13 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: scylla
+  ignoreDifferences:
+    - group: scylla.scylladb.com
+      kind: ScyllaCluster
+      jqPathExpressions:
+        - .spec.repository
+        - .spec.agentRepository
+        - .spec.datacenter.racks[].agentResources
   syncPolicy:
     automated:
       prune: true
