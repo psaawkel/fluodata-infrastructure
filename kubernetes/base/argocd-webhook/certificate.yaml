@@ -1,0 +1,14 @@
+# TLS certificate for the ArgoCD webhook endpoint.
+# Uses the existing letsencrypt-prod ClusterIssuer (from mqtt stack).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-webhook-tls
+  namespace: argocd
+spec:
+  secretName: argocd-webhook-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - cloud.fluodata.pl

@@ -1,0 +1,21 @@
+# Traefik IngressRoute exposing only the ArgoCD webhook endpoint.
+# GitHub sends POST to https://cloud.fluodata.pl/api/webhook
+# which Traefik routes to argocd-server in the argocd namespace.
+# allowCrossNamespace is enabled on Traefik so this works from any namespace.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd-webhook
+  namespace: argocd
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`cloud.fluodata.pl`) && PathPrefix(`/api/webhook`)
+      kind: Rule
+      services:
+        - name: argocd-server
+          port: 80
+  tls:
+    certResolver: ""
+    secretName: argocd-webhook-tls
