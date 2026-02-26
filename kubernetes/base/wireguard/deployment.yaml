@@ -1,0 +1,56 @@
+# wg-easy — WireGuard VPN with web UI.
+# Requires NET_ADMIN + privileged for WireGuard interface creation.
+# Web UI (51821) is only accessible through the VPN tunnel.
+# WireGuard UDP (51820) is exposed via NodePort.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wg-easy
+  namespace: wireguard
+  labels:
+    app: wg-easy
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wg-easy
+  template:
+    metadata:
+      labels:
+        app: wg-easy
+    spec:
+      containers:
+        - name: wg-easy
+          image: ghcr.io/wg-easy/wg-easy:15
+          ports:
+            - name: wireguard
+              containerPort: 51820
+              protocol: UDP
+            - name: web-ui
+              containerPort: 51821
+              protocol: TCP
+          env:
+            - name: INSECURE
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /etc/wireguard
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+                - SYS_MODULE
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: wg-easy-data

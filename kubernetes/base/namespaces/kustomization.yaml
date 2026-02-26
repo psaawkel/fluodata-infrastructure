@@ -6,3 +6,4 @@ resources:
   - logging.yaml
   - traefik.yaml
   - mqtt.yaml
+  - wireguard.yaml

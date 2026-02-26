@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wg-easy
+  namespace: wireguard
+spec:
+  selector:
+    app: wg-easy
+  type: NodePort
+  ports:
+    # WireGuard UDP — fixed NodePort so firewall rules and client configs are stable
+    - name: wireguard
+      port: 51820
+      targetPort: 51820
+      protocol: UDP
+      nodePort: 31820
+    # Web UI — ClusterIP only, accessible through VPN tunnel
+    - name: web-ui
+      port: 51821
+      targetPort: 51821
+      protocol: TCP
