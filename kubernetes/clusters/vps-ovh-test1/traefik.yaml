@@ -84,9 +84,9 @@ spec:
               default: false
             protocol: TCP
 
-          # Metrics — internal only, port 9100
+          # Metrics — internal only, port 9101 (9100 is taken by node-exporter)
           metrics:
-            port: 9100
+            port: 9101
             expose:
               default: false
             protocol: TCP
