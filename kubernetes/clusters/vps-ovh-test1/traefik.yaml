@@ -25,6 +25,7 @@ spec:
         updateStrategy:
           rollingUpdate:
             maxUnavailable: 1
+            maxSurge: 0
 
         # --- IngressClass ---
         ingressClass:
