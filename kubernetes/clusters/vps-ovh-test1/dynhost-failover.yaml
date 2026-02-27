@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: git@github.com:psaawkel/fluodata-infrastructure.git
     targetRevision: HEAD
-    path: kubernetes/base/dynhost-failover
+    path: kubernetes/overlays/vps-ovh-test1/dynhost-failover
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
