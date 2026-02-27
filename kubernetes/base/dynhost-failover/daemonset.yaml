@@ -23,6 +23,7 @@ spec:
           operator: Exists
         - effect: NoExecute
           operator: Exists
+      serviceAccountName: dynhost-failover
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:

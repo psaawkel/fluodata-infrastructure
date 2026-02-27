@@ -12,6 +12,18 @@ data:
       echo "$(date '+%Y-%m-%d %H:%M:%S') $1"
     }
 
+    K8S_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+    K8S_API="https://kubernetes.default.svc"
+
+    # Auto-detect node IPs from Kubernetes API, sorted for deterministic priority
+    detect_nodes() {
+      curl -sk -H "Authorization: Bearer ${K8S_TOKEN}" \
+        "${K8S_API}/api/v1/nodes" | \
+        grep -B1 '"InternalIP"' | \
+        grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | \
+        sort -t. -k1,1n -k2,2n -k3,3n -k4,4n
+    }
+
     check_health() {
       url=$(echo "$HEALTH_URL_TEMPLATE" | sed "s/__IP__/$1/")
       result=$(curl -sk --max-time 5 "$url" 2>/dev/null) || return 1
@@ -25,48 +37,35 @@ data:
     }
 
     update_dns() {
-      TARGET_IP="$1"
-      log "UPDATE: $DYNHOST_HOSTNAME $CURRENT_IP -> $TARGET_IP"
+      log "UPDATE: $DYNHOST_HOSTNAME $CURRENT_IP -> $1"
       RESULT=$(curl -s --max-time 10 -u "${DYNHOST_USER}:${DYNHOST_PASS}" \
-        "https://www.ovh.com/nic/update?system=dyndns&hostname=${DYNHOST_HOSTNAME}&myip=${TARGET_IP}")
+        "https://www.ovh.com/nic/update?system=dyndns&hostname=${DYNHOST_HOSTNAME}&myip=$1")
       log "DynHost response: $RESULT"
     }
 
+    # Detect nodes
+    NODE_IPS=$(detect_nodes)
+    NODE_COUNT=$(echo "$NODE_IPS" | wc -l)
+
+    if [ "$NODE_COUNT" -eq 0 ] || [ -z "$NODE_IPS" ]; then
+      log "CRIT: Could not detect any nodes from Kubernetes API"
+      exit 1
+    fi
+
+    log "Detected $NODE_COUNT nodes: $(echo $NODE_IPS | tr '\n' ' ')"
+
+    # Resolve current DNS
     CURRENT_IP=$(resolve_dns)
     if [ -z "$CURRENT_IP" ]; then
       log "WARN: Could not resolve $DYNHOST_HOSTNAME"
     fi
 
     # --- Test rotate mode ---
-    # When TEST_ROTATE_INTERVAL > 0, cycle through nodes ignoring health.
-    # Uses a shared state file so all DaemonSet pods agree on timing.
     ROTATE="${TEST_ROTATE_INTERVAL:-0}"
     if [ "$ROTATE" != "0" ] && [ -n "$ROTATE" ]; then
-      # Build ordered IP list
-      NODE_IPS=""
-      NODE_COUNT=0
-      OLD_IFS="$IFS"
-      IFS=','
-      for entry in $NODES; do
-        IFS="$OLD_IFS"
-        ip="${entry#*:}"
-        NODE_IPS="${NODE_IPS}${NODE_IPS:+ }${ip}"
-        NODE_COUNT=$((NODE_COUNT + 1))
-      done
-      IFS="$OLD_IFS"
-
-      # Pick node based on time: epoch / interval mod node_count
       EPOCH=$(date +%s)
       INDEX=$(( (EPOCH / ROTATE) % NODE_COUNT ))
-      I=0
-      TARGET=""
-      for ip in $NODE_IPS; do
-        if [ "$I" -eq "$INDEX" ]; then
-          TARGET="$ip"
-          break
-        fi
-        I=$((I + 1))
-      done
+      TARGET=$(echo "$NODE_IPS" | sed -n "$((INDEX + 1))p")
 
       if [ "$CURRENT_IP" != "$TARGET" ]; then
         log "TEST ROTATE: slot=$INDEX target=$TARGET"
@@ -79,11 +78,7 @@ data:
 
     # --- Normal failover mode ---
     BEST_IP=""
-    OLD_IFS="$IFS"
-    IFS=','
-    for entry in $NODES; do
-      IFS="$OLD_IFS"
-      ip="${entry#*:}"
+    for ip in $NODE_IPS; do
       if check_health "$ip"; then
         BEST_IP="$ip"
         break
@@ -91,7 +86,6 @@ data:
         log "WARN: Node $ip is unhealthy"
       fi
     done
-    IFS="$OLD_IFS"
 
     if [ -z "$BEST_IP" ]; then
       log "CRIT: No healthy node found — keeping current DNS ($CURRENT_IP)"
