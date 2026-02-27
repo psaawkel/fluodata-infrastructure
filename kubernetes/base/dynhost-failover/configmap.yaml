@@ -19,8 +19,7 @@ data:
     detect_nodes() {
       curl -sk -H "Authorization: Bearer ${K8S_TOKEN}" \
         "${K8S_API}/api/v1/nodes" | \
-        grep -B1 '"InternalIP"' | \
-        grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | \
+        awk '/"InternalIP"/{getline; gsub(/[" ]/, ""); sub(/address:/, ""); print}' | \
         sort -t. -k1,1n -k2,2n -k3,3n -k4,4n
     }
 
