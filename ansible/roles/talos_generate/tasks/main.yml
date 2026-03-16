@@ -44,6 +44,32 @@
   when: not _secrets_stat.stat.exists
 
 # =============================================================================
+# Compute and persist a CA fingerprint at generation time.
+# This fingerprint is the source of truth for what secrets are on-disk.
+# On subsequent runs it is compared against the fingerprint embedded in the
+# generated talosconfig so we can detect CA drift before anything is applied.
+# =============================================================================
+- name: Compute CA fingerprint from secrets.yaml
+  ansible.builtin.shell: >-
+    python3 -c
+    "import yaml,base64,subprocess,tempfile,os;
+    s=yaml.safe_load(open('{{ env_dir }}/secrets.yaml'));
+    ca=base64.b64decode(s['certs']['os']['crt']);
+    tmp=tempfile.NamedTemporaryFile(suffix='.pem',delete=False);
+    tmp.write(ca);tmp.close();
+    r=subprocess.run(['openssl','x509','-noout','-fingerprint','-in',tmp.name],capture_output=True,text=True);
+    os.unlink(tmp.name);
+    print(r.stdout.strip())"
+  register: _ca_fingerprint
+  changed_when: false
+
+- name: Persist CA fingerprint to env_dir
+  ansible.builtin.copy:
+    dest: "{{ env_dir }}/.ca-fingerprint"
+    content: "{{ _ca_fingerprint.stdout }}\n"
+    mode: "0600"
+
+# =============================================================================
 # Generate config patches from templates
 # =============================================================================
 - name: Generate control plane common patch

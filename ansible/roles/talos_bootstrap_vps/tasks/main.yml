@@ -13,6 +13,51 @@
 # =============================================================================
 
 # =============================================================================
+# Pre-flight: verify CA fingerprint in talosconfig matches secrets.yaml.
+# This catches the most dangerous scenario: secrets regenerated after bootstrap.
+# =============================================================================
+- name: Check if CA fingerprint file exists (pre-flight)
+  ansible.builtin.stat:
+    path: "{{ env_dir }}/.ca-fingerprint"
+  register: _preflight_fp_stat
+
+- name: Read persisted CA fingerprint (pre-flight)
+  ansible.builtin.slurp:
+    src: "{{ env_dir }}/.ca-fingerprint"
+  register: _preflight_fp_file
+  when: _preflight_fp_stat.stat.exists
+
+- name: Read CA fingerprint from talosconfig (pre-flight)
+  ansible.builtin.shell: >-
+    python3 -c
+    "import yaml,base64,subprocess,tempfile,os;
+    tc=yaml.safe_load(open('{{ env_dir }}/talosconfig'));
+    ctx=list(tc['contexts'].values())[0];
+    ca=base64.b64decode(ctx['ca']);
+    tmp=tempfile.NamedTemporaryFile(suffix='.pem',delete=False);
+    tmp.write(ca);tmp.close();
+    r=subprocess.run(['openssl','x509','-noout','-fingerprint','-in',tmp.name],capture_output=True,text=True);
+    os.unlink(tmp.name);
+    print(r.stdout.strip())"
+  register: _preflight_tc_fp
+  changed_when: false
+  when: _preflight_fp_stat.stat.exists
+
+- name: Fail immediately on CA fingerprint mismatch (pre-flight)
+  ansible.builtin.fail:
+    msg: >-
+      PRE-FLIGHT FAILED: CA fingerprint mismatch between secrets.yaml and talosconfig.
+      Expected (from .ca-fingerprint): {{ (_preflight_fp_file.content | b64decode).strip() }}
+      Got in talosconfig:              {{ _preflight_tc_fp.stdout }}
+      Do NOT apply configs. Your secrets.yaml and talosconfig are out of sync.
+      This means talosconfig was regenerated from a different secrets.yaml than
+      what was used to bootstrap. Fix: run talos_generate again with the correct
+      secrets.yaml, or re-bootstrap the cluster from scratch.
+  when:
+    - _preflight_fp_stat.stat.exists
+    - (_preflight_fp_file.content | b64decode).strip() != _preflight_tc_fp.stdout
+
+# =============================================================================
 # Wait for Talos API, detect mode, apply configs
 # =============================================================================
 - name: Wait for Talos API on all nodes (port 50000)
@@ -139,6 +184,64 @@
         --nodes {{ controlplane_nodes[0].host }}
         --endpoints {{ cluster_vip | default(controlplane_nodes[0].host) }}
         --force
+
+- name: Verify kubeconfig is non-empty
+  ansible.builtin.stat:
+    path: "{{ env_dir }}/kubeconfig"
+  register: _kubeconfig_stat
+
+- name: Fail if kubeconfig is empty (auth failure)
+  ansible.builtin.fail:
+    msg: >-
+      kubeconfig at {{ env_dir }}/kubeconfig is empty (0 bytes).
+      This means talosctl kubeconfig failed silently — likely a CA mismatch
+      between talosconfig and the running cluster. Check that secrets.yaml
+      matches the cluster that was bootstrapped (compare .ca-fingerprint).
+  when: _kubeconfig_stat.stat.size == 0
+
+# =============================================================================
+# Verify CA fingerprint matches what talos_generate persisted.
+# Catches the case where secrets.yaml was regenerated after bootstrap.
+# =============================================================================
+- name: Check if CA fingerprint file exists
+  ansible.builtin.stat:
+    path: "{{ env_dir }}/.ca-fingerprint"
+  register: _fp_stat
+
+- name: Read persisted CA fingerprint
+  ansible.builtin.slurp:
+    src: "{{ env_dir }}/.ca-fingerprint"
+  register: _fp_file
+  when: _fp_stat.stat.exists
+
+- name: Read CA fingerprint from live talosconfig
+  ansible.builtin.shell: >-
+    python3 -c
+    "import yaml,base64,subprocess,tempfile,os;
+    tc=yaml.safe_load(open('{{ env_dir }}/talosconfig'));
+    ctx=list(tc['contexts'].values())[0];
+    ca=base64.b64decode(ctx['ca']);
+    tmp=tempfile.NamedTemporaryFile(suffix='.pem',delete=False);
+    tmp.write(ca);tmp.close();
+    r=subprocess.run(['openssl','x509','-noout','-fingerprint','-in',tmp.name],capture_output=True,text=True);
+    os.unlink(tmp.name);
+    print(r.stdout.strip())"
+  register: _tc_fingerprint
+  changed_when: false
+  when: _fp_stat.stat.exists
+
+- name: Fail if CA fingerprint mismatch detected
+  ansible.builtin.fail:
+    msg: >-
+      CA FINGERPRINT MISMATCH DETECTED.
+      secrets.yaml CA: {{ (_fp_file.content | b64decode).strip() }}
+      talosconfig CA:  {{ _tc_fingerprint.stdout }}
+      This means talosconfig was regenerated from different secrets than
+      what this cluster was bootstrapped with. Do NOT proceed.
+      Recovery: restore original secrets.yaml or re-bootstrap the cluster.
+  when:
+    - _fp_stat.stat.exists
+    - (_fp_file.content | b64decode).strip() != _tc_fingerprint.stdout
 
 # Set kubeconfig_path for cilium role (runs next on same host)
 - name: Set kubeconfig path for subsequent roles

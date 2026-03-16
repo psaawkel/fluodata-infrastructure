@@ -104,6 +104,63 @@
   loop_control:
     label: "{{ item.name }}"
 
+# =============================================================================
+# Guard: detect if any node IP is already claimed by a different environment.
+# This prevents silently overwriting a running cluster by reusing a server.
+# =============================================================================
+- name: Find all environment config.yml files
+  ansible.builtin.find:
+    paths: "{{ env_dir | dirname }}"
+    patterns: "config.yml"
+    recurse: true
+  register: _all_configs
+
+- name: Check for IP collisions with other environments
+  ansible.builtin.shell: |
+    set -e
+    python3 - <<'PYEOF'
+    import yaml, sys, os
+
+    current_env = "{{ env_dir | realpath }}"
+    current_ips = set({{ _enriched_nodes | map(attribute='ip') | list | to_json }})
+    configs = {{ _all_configs.files | map(attribute='path') | list | to_json }}
+
+    conflicts = []
+    for cfg_path in configs:
+        other_env = os.path.dirname(os.path.realpath(cfg_path))
+        if other_env == current_env:
+            continue
+        try:
+            with open(cfg_path) as f:
+                cfg = yaml.safe_load(f)
+            if cfg.get('platform') != 'vps':
+                continue
+            other_nodes = cfg.get('nodes', cfg.get('controlplane_nodes', []) + cfg.get('worker_nodes', []))
+            for node in other_nodes:
+                ip = node.get('ip') or node.get('host', '')
+                if ip in current_ips:
+                    conflicts.append(f"IP {ip} is also used in {other_env}")
+        except Exception:
+            pass
+
+    if conflicts:
+        print("IP_COLLISION: " + " | ".join(conflicts))
+    else:
+        print("OK")
+    PYEOF
+  register: _ip_collision_check
+  changed_when: false
+
+- name: Fail on IP collision between environments
+  ansible.builtin.fail:
+    msg: |
+      SAFETY CHECK FAILED: Node IP collision detected across environments.
+      {{ _ip_collision_check.stdout }}
+      A server IP can only belong to one environment at a time.
+      If you intentionally replaced the cluster on this server, remove or
+      archive the old environment directory first.
+  when: _ip_collision_check.stdout is search("IP_COLLISION")
+
 - name: Show deployment info
   ansible.builtin.debug:
     msg: |
