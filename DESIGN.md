@@ -1,8 +1,8 @@
-# FluoData Infrastructure — Unified Multi-Platform Design
+# FluoData Infrastructure — Design
 
-**Version:** 4.0 (Ansible-based, multi-platform, refactored role architecture)  
-**Status:** VPS tested end-to-end (OVH VPS), Proxmox tested (pre-refactor, re-test pending)  
-**Date:** 2026-02-24
+**Version:** 5.0 (Ansible + ArgoCD, multi-platform)
+**Status:** VPS (OVH 3-node) tested and running in production. Proxmox tested (pre-refactor, re-test pending).
+**Date:** 2026-03-17
 
 ---
 
@@ -12,44 +12,63 @@
 
 ```bash
 # New environment: copy example, fill one config file, deploy
-cp -r environments/proxmox-example/ environments/proxmox-homelab/
-vim environments/proxmox-homelab/config.yml
+cp -r environments/vps-example/ environments/vps-prod/
+vim environments/vps-prod/config.yml
+sops --encrypt --in-place environments/vps-prod/config.yml
 
 cd ansible
-ansible-playbook proxmox-deploy.yml -e env=../environments/proxmox-homelab
-ansible-playbook proxmox-destroy.yml -e env=../environments/proxmox-homelab
+ansible-playbook vps-deploy-rescue.yml -e env=../environments/vps-prod  # Step 1: write Talos to disk
+# --- Manual: switch VPS boot mode to local, reboot (provider dashboard) ---
+ansible-playbook vps-deploy.yml -e env=../environments/vps-prod          # Step 2: bootstrap cluster
 ```
 
 After deploy, the env folder contains everything:
+
 ```
-environments/proxmox-homelab/
-├── config.yml          # Your settings (the only file you edit)
+environments/vps-prod/
+├── config.yml          # Your settings (SOPS-encrypted)
 ├── secrets.yaml        # Talos cluster secrets (generated once)
 ├── talosconfig         # Talos admin access
 ├── kubeconfig          # Kubernetes admin access
 ├── controlplane.yaml   # Generated Talos CP config
 ├── worker.yaml         # Generated Talos worker config
-├── patch-*.yaml        # Generated node patches
+└── patch-*.yaml        # Generated node patches
 ```
 
 ---
 
-## 2. Design Decisions
+## 2. Architecture
 
-| Decision | Rationale |
-|----------|-----------|
-| **Single config file** | One `config.yml` per environment. No hunting across hosts.yml, group_vars, playbooks. |
-| **Env folder = state folder** | All generated files (secrets, kubeconfig, talosconfig, patches) live in the env folder. Your entire cluster state in one place. |
-| **Gitignored env folders** | Real env folders (`proxmox-*`, `vps-*`) are gitignored. Only `*-example/` are committed. Sync real folders to a secure cloud backup. |
-| **Ansible over Terraform** | Terraform's `stop_on_destroy` with Talos VMs is dangerously slow (5+ min ACPI timeout). Ansible handles the imperative flow cleanly. |
-| **Split playbooks per platform** | `proxmox-deploy.yml`, `vps-deploy-rescue.yml`, `vps-deploy.yml`, `proxmox-destroy.yml`, `vps-destroy.yml`. No platform checks inside playbooks — clean linear flow. Playbook validates `platform` field matches and fails early if wrong. |
-| **Extracted validations** | Common config loading (`tasks/load-config.yml`) and per-platform validation (`tasks/validate-proxmox.yml`, `tasks/validate-vps.yml`) are in reusable task files. |
-| **Merged plays by host** | Plays targeting the same host are merged into a single play with multiple roles. No unnecessary play boundaries. |
-| **VPS not OVH** | Platform is `vps`, not `ovh` — not tied to a specific provider. Works with any VPS that supports rescue mode boot. |
-| **Cilium via Helm** | Post-bootstrap `helm install` is simpler than embedding 1600+ lines of YAML in Talos config. |
-| **kubelet-serving-cert-approver** | Kubelet serving cert CSRs (`kubernetes.io/kubelet-serving`) are NOT auto-approved by Kubernetes. Without this controller, kubelet port 10250 gets TLS errors. |
-| **No `machine.network.hostname`** | dnsmasq handles it (Proxmox) or Talos auto-generates (VPS). |
-| **`deviceSelector: { physical: true }`** | Works across QEMU and bare metal. |
+The repository has two layers of responsibility:
+
+**Layer 1 — Cluster provisioning (Ansible)**
+Ansible handles all day-0 tasks that require direct machine access: writing Talos to disk, bootstrapping the cluster, installing Cilium CNI, and installing ArgoCD. Once the cluster is running, Ansible's job is done (except for upgrades).
+
+**Layer 2 — Application delivery (ArgoCD + GitOps)**
+ArgoCD continuously syncs Kubernetes manifests from git to the cluster. All application workloads, secrets, and infrastructure components (ingress, monitoring, databases) are managed declaratively from git.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Git repository (single source of truth)            │
+│                                                     │
+│  ansible/        → cluster provisioning             │
+│  environments/   → per-env config (SOPS-encrypted)  │
+│  kubernetes/     → ArgoCD Application CRs + manifests│
+│  .sops.yaml      → encryption rules                 │
+└──────────┬──────────────────────┬───────────────────┘
+           │                      │
+  Ansible provisions       ArgoCD syncs
+  cluster + ArgoCD         manifests to cluster
+           │                      │
+           ▼                      ▼
+┌──────────────────────────────────────────────────┐
+│  Kubernetes cluster                              │
+│                                                  │
+│  kube-system     → Cilium CNI (Ansible install)  │
+│  argocd          → ArgoCD + KSOPS                │
+│  *               → workloads (ArgoCD-managed)    │
+└──────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -59,188 +78,232 @@ environments/proxmox-homelab/
 fluodata-infrastructure/
 ├── ansible/
 │   ├── ansible.cfg
-│   ├── proxmox-deploy.yml          # Proxmox deploy
-│   ├── proxmox-destroy.yml         # Proxmox destroy
-│   ├── vps-deploy-rescue.yml       # VPS: write Talos to disk (rescue mode)
-│   ├── vps-deploy.yml              # VPS: bootstrap + Cilium (after reboot)
-│   ├── vps-destroy.yml             # VPS destroy
+│   ├── proxmox-deploy.yml          # Proxmox: full deploy
+│   ├── proxmox-destroy.yml         # Proxmox: destroy cluster
+│   ├── vps-deploy-rescue.yml       # VPS step 1: write Talos to disk (rescue mode)
+│   ├── vps-deploy.yml              # VPS step 2: bootstrap + Cilium + ArgoCD
+│   ├── vps-argocd.yml              # ArgoCD-only install/upgrade
+│   ├── vps-destroy.yml             # VPS: destroy cluster
 │   ├── tasks/
-│   │   ├── load-config.yml         # Common: resolve path, load config.yml
-│   │   ├── validate-proxmox.yml    # Proxmox: check fields, set vars, add_host
-│   │   └── validate-vps.yml        # VPS: check fields, set vars, add rescue hosts
+│   │   ├── load-config.yml         # Resolve path, load + SOPS-decrypt config.yml
+│   │   ├── validate-proxmox.yml    # Check Proxmox fields, add_host
+│   │   └── validate-vps.yml        # Check VPS fields, add rescue hosts
 │   └── roles/
-│       ├── talos_generate/        # COMMON: generate secrets, patches, machine configs
-│       ├── talos_bootstrap_proxmox/ # Proxmox: copy configs, apply, bootstrap, kubeconfig
-│       ├── talos_bootstrap_vps/   # VPS: apply configs, bootstrap, kubeconfig
-│       ├── talos_install/         # VPS-only: dd image in rescue mode
-│       ├── proxmox_vms/           # Proxmox-only: create/start VMs
-│       ├── proxmox_dnsmasq/       # Proxmox-only: dnsmasq DHCP config
-│       ├── proxmox_post_install/  # Proxmox-only: boot order fix
-│       ├── cilium/                # COMMON: helm install Cilium
-│       └── kubelet_cert_approver/ # COMMON: auto-approve kubelet serving cert CSRs
+│       ├── talos_generate/         # Generate secrets, patches, machine configs
+│       ├── talos_bootstrap_proxmox/# Apply configs, bootstrap, kubeconfig (Proxmox)
+│       ├── talos_bootstrap_vps/    # Apply configs, bootstrap, kubeconfig (VPS)
+│       ├── talos_install/          # Write Talos image to disk (rescue mode)
+│       ├── proxmox_vms/            # Create/start Proxmox VMs
+│       ├── proxmox_dnsmasq/        # dnsmasq DHCP config
+│       ├── proxmox_post_install/   # Fix boot order after Talos install
+│       ├── cilium/                 # Helm install Cilium
+│       ├── kubelet_cert_approver/  # Auto-approve kubelet serving cert CSRs
+│       └── argocd/                 # Install ArgoCD + KSOPS, create root Application
 │
 ├── environments/
-│   ├── proxmox-example/            # Committed — copy for new Proxmox env
-│   │   └── config.yml
-│   └── vps-example/                # Committed — copy for new VPS env
-│       └── config.yml
-│
+│   ├── proxmox-example/config.yml  # Committed — copy for new Proxmox env
+│   └── vps-example/config.yml      # Committed — copy for new VPS env
 │   # Real envs are GITIGNORED (contain secrets + generated files):
 │   # environments/proxmox-homelab/
-│   # environments/vps-prod/
+│   # environments/vps-ovh-test1/   ← live cluster (SOPS-encrypted, committed)
 │
-├── _archive/terraform/             # Legacy Terraform code
-├── infra-proxmox/                  # Old working Ansible (reference, to be removed)
-├── DESIGN.md, EXPERIENCE.md, REQUIREMENTS.md
+├── kubernetes/                     # GitOps manifests (ArgoCD watches this)
+│   ├── base/argocd/                # ArgoCD Helm values (KSOPS config)
+│   ├── base/<app>/                 # Shared Kustomize bases per app
+│   ├── overlays/
+│   │   └── vps-ovh-test1/          # Per-cluster Kustomize overlays
+│   └── clusters/
+│       └── vps-ovh-test1/          # Live cluster: 17 ArgoCD Application CRs
+│           ├── apps.yaml           # Root Application (self-referencing app-of-apps)
+│           └── *.yaml              # One Application CR per managed component
+│
+├── .sops.yaml                      # SOPS encryption rules
 └── .gitignore
 ```
 
 ---
 
-## 4. Config File Schema
+## 4. Design Decisions
 
-### Proxmox (`environments/proxmox-example/config.yml`)
+| Decision | Rationale |
+|----------|-----------|
+| **Single config file** | One `config.yml` per environment. No hunting across hosts.yml, group_vars, playbooks. |
+| **Env folder = state folder** | All generated files (secrets, kubeconfig, talosconfig, patches) live in the env folder. Entire cluster state in one place. |
+| **Real env folders gitignored** | `proxmox-*/`, `vps-*/` are gitignored (except `*-example/`). Exception: `vps-ovh-test1/` is committed SOPS-encrypted because it contains only encrypted config.yml. |
+| **Ansible over Terraform** | Terraform's `stop_on_destroy` with Talos VMs is dangerously slow (5+ min ACPI timeout). Ansible handles imperative flow cleanly with `force: true`. |
+| **Two-step VPS deploy** | Rebooting from rescue mode re-enters rescue unless boot mode is first switched in the provider dashboard. `vps-deploy-rescue.yml` writes Talos to disk; manual reboot; `vps-deploy.yml` bootstraps. |
+| **Cilium via Helm post-bootstrap** | Post-bootstrap `helm install` is simpler than embedding 1600+ lines of YAML in Talos config. K8s API is reachable before nodes are Ready. |
+| **ArgoCD app-of-apps** | `kubernetes/clusters/<env>/` holds all ArgoCD Application CRs. Each Application sources from `kubernetes/base/<app>`, `kubernetes/overlays/<env>/<app>`, or an external Helm chart repo. Everything in one tree. |
+| **SOPS + age + KSOPS** | Secrets encrypted in git. No external vault needed. ArgoCD decrypts in-cluster via KSOPS kustomize plugin. Simpler than SealedSecrets. |
+| **`deviceSelector: { physical: true }`** | Works across QEMU and bare metal. `interface: eth0` silently breaks VIP on Talos. |
+| **`kubelet-serving-cert-approver`** | `rotate-server-certificates: true` causes kubelet to request serving certs via CSR. K8s only auto-approves client CSRs. Without this controller, `kubectl logs/exec/port-forward` fail with TLS errors when certs rotate. |
+| **VPS not OVH** | Platform is `vps`, not `ovh` — not tied to a specific provider. Works with any VPS that supports rescue mode boot. |
 
-```yaml
-platform: proxmox
+---
 
-# Proxmox connection
-proxmox_host: 192.168.122.70
-proxmox_node: pve
-proxmox_api_user: root@pam
-proxmox_api_token_id: terraform
-proxmox_api_token_secret: REPLACE_ME
-proxmox_ssh_host: 192.168.122.70
-proxmox_ssh_user: root
+## 5. How It Works
 
-# Talos + cluster
-talos_version: v1.12.4
-talos_schematic_id: e187c9b...
-cluster_name: fluodata
-cluster_vip: 10.10.0.5
+### VPS Deploy Flow
 
-# Network + nodes + Cilium
-vm_gateway: 10.10.0.1
-controlplane_nodes: [...]
-worker_nodes: [...]
-cilium_version: "1.17.3"
 ```
+STEP 1: Write Talos to disk (rescue mode, one-time)
+
+vps-deploy-rescue.yml -e env=../environments/vps-prod
+    ├── Play 1: localhost
+    │   ├── load-config.yml   → resolve path, SOPS-decrypt config.yml, load
+    │   ├── validate-vps.yml  → check fields, set vars, add rescue hosts
+    │   └── talos_generate    → secrets, patches, machine configs → env_dir
+    ├── Play 2: rescue_mode
+    │   └── talos_install     → dd Talos image to disk
+    └── Play 3: localhost
+        └── Print next steps (switch boot mode, reboot)
+
+--- Manual: switch VPS to normal boot + reboot (provider dashboard) ---
+
+STEP 2: Bootstrap cluster
+
+vps-deploy.yml -e env=../environments/vps-prod
+    └── Play 1: localhost
+        ├── load-config.yml       → SOPS-decrypt, load
+        ├── validate-vps.yml      → check fields
+        ├── talos_generate        → idempotent (same secrets → same configs)
+        ├── talos_bootstrap_vps   → wait for Talos API → apply → bootstrap → kubeconfig
+        ├── cilium                → Helm install, wait for nodes Ready
+        ├── kubelet_cert_approver → deploy cert approver controller
+        └── argocd                → install ArgoCD + KSOPS, create root Application
+```
+
+### Proxmox Deploy Flow
+
+```
+proxmox-deploy.yml -e env=../environments/proxmox-homelab
+    ├── Play 1: localhost
+    │   ├── load-config.yml         → resolve path, load config.yml
+    │   ├── validate-proxmox.yml    → check fields, add Proxmox host
+    │   └── talos_generate          → secrets, patches, machine configs
+    └── Play 2: proxmox_hosts
+        ├── proxmox_dnsmasq         → configure DHCP reservations
+        ├── proxmox_vms             → download ISO, create VMs, start
+        ├── talos_bootstrap_proxmox → apply configs, bootstrap, kubeconfig
+        ├── proxmox_post_install    → switch boot order, detach ISO
+        ├── cilium                  → Helm install, wait for nodes Ready
+        ├── kubelet_cert_approver   → deploy cert approver controller
+        └── argocd                  → install ArgoCD + KSOPS, create root Application
+```
+
+### GitOps Flow (post-bootstrap)
+
+```
+Developer pushes to git
+    └── ArgoCD detects diff (polls or webhook)
+        └── Renders manifests (kustomize + KSOPS decrypts secrets)
+            └── Applies to cluster (automated prune + self-heal)
+```
+
+ArgoCD root Application watches `kubernetes/clusters/<env-name>/`. Each file there is an
+ArgoCD Application CR. Applications point to either:
+- A path in `kubernetes/base/<app>` or `kubernetes/overlays/<env>/<app>` (Kustomize, git-backed)
+- An external Helm chart repository (cert-manager, VictoriaMetrics, Traefik, Loki, etc.)
+
+To add a new workload: add an Application CR in `kubernetes/clusters/<env>/` and (if
+git-backed) add the manifests under `kubernetes/base/` or `kubernetes/overlays/<env>/`.
+
+---
+
+## 6. Config File Schema
 
 ### VPS (`environments/vps-example/config.yml`)
 
 ```yaml
 platform: vps
 
-# Talos + cluster (no VIP on VPS)
 talos_version: v1.12.4
-talos_schematic_id: e187c9b...
+talos_schematic_id: <factory-schematic-id>
 cluster_name: fluodata
 
-# Network + nodes (public IPs)
 vm_gateway: REPLACE_WITH_GATEWAY
 controlplane_nodes:
   - name: node-0
     ip: REPLACE_WITH_PUBLIC_IP
-worker_nodes: []             # All nodes are combined CP+worker
+    rescue_ssh_host: REPLACE_WITH_RESCUE_IP
+    rescue_ssh_pass: REPLACE_ME       # SOPS-encrypted
+worker_nodes: []                      # All nodes are combined CP+worker
 cilium_version: "1.17.3"
+argocd_repo_url: git@github.com:org/fluodata-infrastructure.git
+```
+
+### Proxmox (`environments/proxmox-example/config.yml`)
+
+```yaml
+platform: proxmox
+
+proxmox_host: 192.168.122.70
+proxmox_node: pve
+proxmox_api_user: root@pam
+proxmox_api_token_id: ansible
+proxmox_api_token_secret: REPLACE_ME  # SOPS-encrypted
+proxmox_ssh_host: 192.168.122.70
+proxmox_ssh_user: root
+
+talos_version: v1.12.4
+talos_schematic_id: <factory-schematic-id>
+cluster_name: fluodata
+cluster_vip: 10.10.0.5
+
+vm_gateway: 10.10.0.1
+controlplane_nodes: [...]
+worker_nodes: [...]
+cilium_version: "1.17.3"
+argocd_repo_url: git@github.com:org/fluodata-infrastructure.git
 ```
 
 ---
 
-## 5. How It Works
-
-### Proxmox Flow
-
-```
-proxmox-deploy.yml -e env=../environments/proxmox-homelab
-    │
-    ├── Play 1: localhost
-    │   ├── load-config.yml → resolve path, load config.yml
-    │   ├── validate-proxmox.yml → check fields, set vars, add Proxmox host
-    │   └── talos_generate → secrets, patches, machine configs → env_dir
-    │
-    └── Play 2: proxmox_hosts (single play, 5 roles)
-        ├── proxmox_dnsmasq         → Configure DHCP reservations
-        ├── proxmox_vms             → Download ISO, create VMs, start VMs
-        ├── talos_bootstrap_proxmox → Copy configs, apply, bootstrap, kubeconfig
-        ├── proxmox_post_install    → Switch boot order to disk, detach ISO
-        ├── cilium                  → Install Cilium, wait for nodes Ready
-        └── kubelet_cert_approver   → Deploy kubelet serving cert auto-approver
-```
-
-### VPS Flow
-
-VPS deploy is a two-step process because the reboot from rescue mode to Talos
-requires a provider-specific action (e.g., OVH: switch netboot from rescue → local
-in the dashboard, then reboot).
-
-```
-STEP 1: Write Talos to disk (one-time, rescue mode)
-
-vps-deploy-rescue.yml -e env=../environments/vps-prod
-    │
-    ├── Play 1: localhost
-    │   ├── load-config.yml → resolve path, load config.yml
-    │   ├── validate-vps.yml → check fields, set vars, add rescue hosts
-    │   └── talos_generate → secrets, patches, machine configs → env_dir
-    │
-    ├── Play 2: rescue_mode
-    │   └── talos_install    → dd Talos image to disk
-    │
-    └── Play 3: localhost
-        └── Print next steps (switch boot mode, reboot)
-
---- Manual step: switch VPS to normal boot mode + reboot (provider dashboard) ---
-
-STEP 2: Bootstrap cluster
-
-vps-deploy.yml -e env=../environments/vps-prod
-    │
-    └── Play 1: localhost (pre_tasks + 4 roles)
-        ├── load-config.yml → resolve path, load config.yml
-        ├── validate-vps.yml → check fields, set vars
-        ├── talos_generate        → Secrets, patches, machine configs (idempotent)
-        ├── talos_bootstrap_vps   → Wait for Talos API → apply → bootstrap → kubeconfig
-        ├── cilium                → Install Cilium, wait for nodes Ready
-        └── kubelet_cert_approver → Deploy kubelet serving cert auto-approver
-```
-
----
-
-## 6. Security
+## 7. Security
 
 ### Env folders
-- Gitignored (`environments/proxmox-*/`, `environments/vps-*/` except `*-example/`)
-- Contain secrets, kubeconfig, talosconfig — treat as sensitive
-- **Backup**: Sync to encrypted cloud storage (e.g., age-encrypted tarball to S3/Backblaze)
+- Gitignored (`environments/proxmox-*/`, `environments/vps-*/` except `*-example/` and SOPS-encrypted real envs)
+- Contain secrets, kubeconfig, talosconfig — treat as highly sensitive
+- **Backup**: sync to encrypted cloud storage (age-encrypted tarball to S3/Backblaze)
+
+### Secret management (SOPS + age)
+- `environments/*/config.yml` — only sensitive fields encrypted (`rescue_ssh_pass`, `password`, `*_secret`)
+- `kubernetes/**/*secret*.yaml` — `data` and `stringData` fields encrypted
+- Age private key lives at `~/.config/sops/age/keys.txt` — never committed, back up to password manager
+- In-cluster: age private key stored as `sops-age` Kubernetes Secret; KSOPS plugin uses it to decrypt during ArgoCD sync
 
 ### VPS network
-- Talos has NO host firewall — provider network firewall is mandatory
-- Ports 50000 (Talos API) and 6443 (K8s API) are mTLS but should be IP-restricted
-- WireGuard pod for admin VPN access
+- Talos has no host firewall — provider network firewall is mandatory
+- Ports 50000 (Talos API) and 6443 (K8s API) are mTLS but should be IP-restricted at the firewall
+- WireGuard for admin VPN access to internal cluster services
 
 ---
 
-## 7. Key Lessons (see EXPERIENCE.md)
+## 8. Sync Wave Order (ArgoCD)
 
-1. **Boot order fix (Proxmox)** — Switch to `scsi0` after install, detach ISO
-2. **Cilium post-bootstrap via Helm** — not inline manifests
-3. **No hostname in Talos patches** — DHCP/hostname conflict
-4. **Factory image with extensions** — iscsi-tools, util-linux-tools, qemu-guest-agent
-5. **Secrets idempotency** — check before generating, reuse across deploys
-6. **talosconfig empty endpoints** — must run `talosctl config endpoint` after gen
-7. **VPS rescue mode** — only viable install path (custom ISO not supported)
-8. **Rescue mode reboot** — rebooting while in rescue mode re-enters rescue (provider sets boot mode). Must switch boot mode to normal/local before reboot. Split into separate `vps-deploy-rescue.yml` and `vps-deploy.yml` playbooks to allow manual reboot step.
-9. **Kubelet serving cert CSRs** — `rotate-server-certificates: true` causes kubelet to request serving certs via CSR, but Kubernetes only auto-approves client CSRs. Deploy `kubelet-serving-cert-approver` controller to auto-approve them. Image tag has no `v` prefix (e.g., `0.10.3` not `v0.10.3`).
-10. **Apply-config idempotency** — `talosctl apply-config --insecure` only works in maintenance mode. Configured nodes require `--talosconfig` auth. Bootstrap roles auto-detect mode and use appropriate method.
-11. **OVH /32 point-to-point routing** — IP is /32, gateway is on different subnet. Requires direct route to gateway before default route. Handled conditionally in node patch template.
-12. **OVH rescue mode auth** — Password-based SSH, not key-based. `rescue_ssh_pass` per-node in config.yml.
+Components deploy in this order via `argocd.argoproj.io/sync-wave` annotations:
+
+| Wave | Components |
+|------|------------|
+| -3   | Namespaces (PodSecurity labels), NetworkPolicies |
+| -2   | Cilium (CNI), kubelet-csr-approver |
+| -1   | Cilium config (IP pools, L2) |
+|  0   | Ingress, cert-manager, VictoriaMetrics, Loki, Alloy |
+|  1   | cert-manager ClusterIssuers, operators (CNPG, RabbitMQ, ScyllaDB), app secrets |
+|  2   | Database/broker instances (PostgreSQL, RabbitMQ, ScyllaDB) |
 
 ---
 
-## 8. Future
+## 9. What Ansible Manages vs What ArgoCD Manages
 
-- **GitOps (ArgoCD)** — manages apps after cluster bootstrap
-- **Secure backup** — age-encrypted env folder sync to cloud
-- **CI/CD** — GitHub Actions for automated deploys
-- **VPS firewall automation** — via provider API
+| Component | Managed by | Why |
+|-----------|------------|-----|
+| VM/VPS lifecycle | Ansible | Requires host-level access |
+| Talos OS | Ansible | Machine-level config |
+| Cilium CNI (initial install) | Ansible | Cluster needs CNI before ArgoCD can run |
+| kubelet-cert-approver (initial) | Ansible | Needed before ArgoCD pods start properly |
+| ArgoCD (initial install) | Ansible | Bootstrap — ArgoCD cannot install itself |
+| Application workloads | ArgoCD | GitOps — push to git, auto-synced |
+| Kubernetes Secrets | ArgoCD + KSOPS | Encrypted in git, decrypted in-cluster |
+| Ingress, cert-manager, monitoring | ArgoCD | Standard Kubernetes components |
+| Cilium upgrades + config | ArgoCD | After initial bootstrap, ArgoCD takes over |

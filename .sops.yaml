@@ -5,7 +5,7 @@
 # Edit encrypted:   sops <file>
 #
 # The age private key must be at ~/.config/sops/age/keys.txt
-# See GITOPS.md for details.
+# See agents.md for details.
 
 creation_rules:
   # Ansible environment configs — encrypt only sensitive fields
