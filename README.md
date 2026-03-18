@@ -96,8 +96,8 @@ ansible-playbook proxmox-deploy.yml -e env=../environments/proxmox-homelab
 export KUBECONFIG=environments/vps-ovh-test1/kubeconfig
 
 # Access ArgoCD UI
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Open https://localhost:8080  |  Username: admin
+kubectl port-forward -n argocd svc/argocd-server 8880:80
+# Open http://localhost:8080  |  Username: admin
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d
 ```

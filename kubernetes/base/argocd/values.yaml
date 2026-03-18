@@ -69,6 +69,8 @@ controller:
 
 server:
   replicas: 1
+  extraArgs:
+    - --insecure  # Serve plain HTTP on port 8080 (default in ArgoCD v3, explicit for clarity)
 
 redis:
   resources:
